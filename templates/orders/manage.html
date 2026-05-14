@@ -1,0 +1,1510 @@
+{% extends "base.html" %}
+{% block title %}주문 관리 - 배마마 통합시스템{% endblock %}
+{% block page_title %}주문 관리{% endblock %}
+
+{% block content %}
+<!-- 필터 -->
+<div class="card mb-3">
+    <div class="card-body py-2">
+        <div class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label small mb-0">시작일</label>
+                <input type="date" class="form-control form-control-sm" id="filterDateFrom">
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">종료일</label>
+                <input type="date" class="form-control form-control-sm" id="filterDateTo">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small mb-0">채널</label>
+                <select class="form-select form-select-sm" id="filterChannel">
+                    <option value="">전체</option>
+                    <option value="스마트스토어_배마마">스마트스토어(배마마)</option>
+                    <option value="스마트스토어_해미애찬">스마트스토어(해미애찬)</option>
+                    <option value="쿠팡">쿠팡</option>
+                    <option value="옥션/G마켓">옥션/G마켓</option>
+                    <option value="자사몰">자사몰</option>
+                    <option value="오아시스">오아시스</option>
+                    <option value="11번가">11번가</option>
+                    <option value="카카오">카카오</option>
+                </select>
+            </div>
+            <div class="col-md-1">
+                <label class="form-label small mb-0">상태</label>
+                <select class="form-select form-select-sm" id="filterStatus">
+                    <option value="">전체</option>
+                    <option value="정상">정상</option>
+                    <option value="취소">취소</option>
+                    <option value="환불">환불</option>
+                </select>
+            </div>
+            <div class="col-md-1">
+                <label class="form-label small mb-0">출고</label>
+                <select class="form-select form-select-sm" id="filterOutbound">
+                    <option value="">전체</option>
+                    <option value="no_invoice">미출고</option>
+                    <option value="invoice_only">송장등록</option>
+                    <option value="done">영상등록</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small mb-0">검색대상</label>
+                <select class="form-select form-select-sm" id="filterSearchField">
+                    <option value="all">전체</option>
+                    <option value="order_no">주문번호</option>
+                    <option value="product">상품명</option>
+                    <option value="invoice">송장번호</option>
+                    <option value="recipient">수취인명</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small mb-0">검색어</label>
+                <input type="text" class="form-control form-control-sm" id="filterSearch"
+                       placeholder="검색어 입력" onkeydown="if(event.key==='Enter')loadOrders()">
+            </div>
+            <div class="col-md-1">
+                <button class="btn btn-primary btn-sm w-100" onclick="loadOrders()">
+                    <i class="bi bi-search"></i> 조회
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 탭: 주문목록 / 업로드이력 -->
+<ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabOrders">
+            <i class="bi bi-list-ul"></i> 주문 목록
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabImports" onclick="loadImportRuns()">
+            <i class="bi bi-clock-history"></i> 업로드 이력
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabApiSync" onclick="loadApiStatus()">
+            <i class="bi bi-cloud-arrow-down"></i> API연동
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <!-- 주문 목록 탭 -->
+    <div class="tab-pane fade show active" id="tabOrders">
+        <!-- 일괄 처리 툴바 (선택 시 표시) -->
+        <div id="bulkToolbar" class="alert alert-info py-2 d-flex align-items-center gap-3" style="display:none !important;">
+            <strong><i class="bi bi-check2-square"></i> <span id="bulkSelectedCount">0</span>건 선택</strong>
+            <button class="btn btn-sm btn-danger" onclick="openBulkCancel()">
+                <i class="bi bi-x-circle"></i> 일괄 취소
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="clearSelection()">선택 해제</button>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover" id="ordersTable">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:36px"><input type="checkbox" class="form-check-input" id="checkAll" onclick="toggleAll(this)" title="전체 선택"></th>
+                        <th>주문일</th>
+                        <th>채널</th>
+                        <th>주문번호</th>
+                        <th>수취인</th>
+                        <th>상품명</th>
+                        <th class="text-end">수량</th>
+                        <th class="text-end">주문금액</th>
+                        <th>송장</th>
+                        <th>패킹/출고</th>
+                        <th>상태</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="ordersBody">
+                    <tr><td colspan="12" class="text-center text-muted py-4">조회 버튼을 눌러 주문을 검색하세요</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mt-2">
+            <small class="text-muted" id="ordersCount"></small>
+            <div>
+                <button class="btn btn-sm btn-outline-secondary" id="btnPrev" onclick="changePage(-1)" disabled>이전</button>
+                <span class="mx-2 small" id="pageInfo"></span>
+                <button class="btn btn-sm btn-outline-secondary" id="btnNext" onclick="changePage(1)" disabled>다음</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 업로드 이력 탭 -->
+    <div class="tab-pane fade" id="tabImports">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>일시</th>
+                        <th>채널</th>
+                        <th>파일명</th>
+                        <th>업로더</th>
+                        <th class="text-end">전체</th>
+                        <th class="text-end">성공</th>
+                        <th class="text-end">변경</th>
+                        <th class="text-end">실패</th>
+                        <th>상태</th>
+                    </tr>
+                </thead>
+                <tbody id="importsBody">
+                    <tr><td colspan="9" class="text-center text-muted py-4">로딩 중...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- API연동 탭 -->
+    <div class="tab-pane fade" id="tabApiSync">
+        <!-- 채널 상태 -->
+        <div id="apiChannelStatus" class="mb-3">
+            <small class="text-muted">채널 상태 로딩 중...</small>
+        </div>
+
+        <!-- 조건 설정 -->
+        <div class="row g-2 align-items-end mb-3">
+            <div class="col-auto">
+                <label class="form-label mb-1 small">채널</label>
+                <select id="apiChannel" class="form-select form-select-sm" style="width:140px;">
+                    <option value="all">전체</option>
+                    <option value="스마트스토어_배마마">스마트스토어(배마마)</option>
+                    <option value="스마트스토어_해미애찬">스마트스토어(해미애찬)</option>
+                    <option value="쿠팡">쿠팡</option>
+                    <option value="자사몰">자사몰</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-1 small">수집기간</label>
+                <input type="date" id="apiDateFrom" class="form-control form-control-sm" style="width:140px;">
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-1 small">~</label>
+                <input type="date" id="apiDateTo" class="form-control form-control-sm" style="width:140px;">
+            </div>
+            <div class="col-auto">
+                <label class="form-label mb-1 small">주문수집일</label>
+                <input type="date" id="apiCollDate" class="form-control form-control-sm" style="width:140px;">
+            </div>
+        </div>
+
+        <!-- ① 주문수집 + 송장 다운로드 -->
+        <div class="d-flex gap-2 mb-3 flex-wrap">
+            <button class="btn btn-sm btn-primary" onclick="apiCollectAndSave()" id="btnApiCollect">
+                <i class="bi bi-cloud-arrow-down"></i> ① API 주문수집 + DB저장
+            </button>
+            <button class="btn btn-sm btn-outline-primary" onclick="apiDownloadPreview()" id="btnApiPreview">
+                <i class="bi bi-file-earmark-spreadsheet"></i> ② 미리보기 (송장 다운로드)
+            </button>
+        </div>
+
+        <!-- 진행/결과 영역 -->
+        <div id="apiProgress" class="d-none mb-3">
+            <div class="d-flex align-items-center gap-2">
+                <div class="spinner-border spinner-border-sm text-primary"></div>
+                <span id="apiProgressText">API 수집 중...</span>
+            </div>
+        </div>
+        <div id="apiResult" style="display:none;"></div>
+
+        <hr class="my-3">
+
+        <!-- ③ CJ 택배 연동 -->
+        <h6 class="small fw-bold mb-2"><i class="bi bi-truck"></i> ③ CJ 택배 송장</h6>
+        <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+            <span class="badge bg-info text-dark">방법 A (자동)</span>
+            <button class="btn btn-sm btn-warning" onclick="cjAutoGenerate()" id="btnCjAuto">
+                <i class="bi bi-lightning"></i> CJ API 예약접수 + 운송장 발번
+            </button>
+        </div>
+        <div class="d-flex gap-2 mb-2 flex-wrap align-items-center">
+            <span class="badge bg-secondary">방법 B (수동)</span>
+            <span class="text-muted small">② 엑셀 CJ에 전달 → CJ 결과파일 받기 →</span>
+            <div class="d-flex gap-1 align-items-center">
+                <input type="file" id="cjFile" class="form-control form-control-sm" accept=".xlsx,.xls" style="width:200px;">
+                <button class="btn btn-sm btn-outline-warning" onclick="cjUploadExcel()" id="btnCjUpload">
+                    <i class="bi bi-upload"></i> CJ 운송장 매칭
+                </button>
+            </div>
+        </div>
+        <div id="cjGenResult" class="small" style="display:none;"></div>
+
+        <hr class="my-3">
+
+        <!-- ④⑤ 마켓 송장등록 -->
+        <h6 class="small fw-bold mb-2"><i class="bi bi-send"></i> ④ 마켓 송장등록 (발송처리)
+            <span id="pushPendingBadge" class="badge bg-secondary ms-1">-</span>
+        </h6>
+        <div class="d-flex gap-2 mb-2 flex-wrap">
+            <select id="pushChannel" class="form-select form-select-sm" style="width:180px;">
+                <option value="스마트스토어_배마마">스마트스토어(배마마)</option>
+                <option value="스마트스토어_해미애찬">스마트스토어(해미애찬)</option>
+                <option value="쿠팡">쿠팡</option>
+                <option value="자사몰">자사몰</option>
+            </select>
+            <button class="btn btn-sm btn-success" onclick="pushToMarket()" id="btnPush">
+                <i class="bi bi-send"></i> API 송장 전송
+            </button>
+            <span class="text-muted small align-self-center">|</span>
+            <button class="btn btn-sm btn-outline-secondary" onclick="downloadMarketFile()" id="btnDownMarket">
+                <i class="bi bi-download"></i> 마켓 파일 다운로드
+            </button>
+        </div>
+        <div id="pushResult" class="small" style="display:none;"></div>
+
+        <!-- 최근 API 수집 이력 -->
+        <div class="mt-3">
+            <h6 class="small fw-bold text-muted"><i class="bi bi-clock-history"></i> 최근 API 수집 이력</h6>
+            <div id="apiHistory" class="small text-muted">주문수집 후 표시됩니다.</div>
+        </div>
+    </div>
+</div>
+
+<!-- 주문 상세 모달 -->
+<div class="modal fade" id="orderDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">주문 상세</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="orderDetailBody">
+                <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 취소/환불 모달 -->
+<div class="modal fade" id="cancelModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">주문 취소/환불</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="cancelOrderId">
+                <div class="mb-3">
+                    <label class="form-label">유형</label>
+                    <select class="form-select" id="cancelType">
+                        <option value="취소">취소</option>
+                        <option value="환불">환불</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">사유 <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="cancelReason" rows="3" placeholder="취소/환불 사유를 입력하세요"></textarea>
+                </div>
+                <div id="cancelOutboundInfo" class="alert alert-warning py-2 small" style="display:none;">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    <strong>출고 처리된 주문입니다.</strong> 취소/환불 시:
+                    <ul class="mb-1 mt-1">
+                        <li><strong>재고 복원</strong>: SALES_RETURN 처리로 재고가 다시 증가합니다</li>
+                        <li><strong>매출 삭제</strong>: 해당 주문의 매출 데이터가 삭제됩니다</li>
+                        <li><strong>출고 상태 초기화</strong>: 출고완료 → 미출고로 변경됩니다</li>
+                    </ul>
+                    <span class="text-muted">* 이미 발송된 택배는 별도로 반품/회수 처리가 필요합니다.</span>
+                </div>
+                <div id="cancelNotShippedInfo" class="alert alert-secondary py-2 small" style="display:none;">
+                    <i class="bi bi-info-circle"></i>
+                    미출고 주문 — 주문 상태만 변경됩니다. (재고 변동 없음)
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                <button class="btn btn-danger" onclick="submitCancel()">확인</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 일괄 취소 모달 -->
+<div class="modal fade" id="bulkCancelModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill"></i> 주문 일괄 취소</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning py-2">
+                    <strong><span id="bulkCancelCount">0</span>건</strong>의 주문을 일괄 취소합니다.
+                    <span id="bulkOutboundWarn" style="display:none">
+                        (출고 완료 <strong><span id="bulkOutboundCount">0</span>건</strong> 포함 — 재고+매출 자동 역분개)
+                    </span>
+                </div>
+                <div class="table-responsive" style="max-height:250px; overflow-y:auto;">
+                    <table class="table table-sm small">
+                        <thead class="table-light"><tr>
+                            <th>주문번호</th><th>수취인</th><th>상품명</th><th class="text-end">수량</th><th>출고</th>
+                        </tr></thead>
+                        <tbody id="bulkCancelList"></tbody>
+                    </table>
+                </div>
+                <hr>
+                <div class="mb-3">
+                    <label class="form-label">유형</label>
+                    <select class="form-select" id="bulkCancelType">
+                        <option value="취소">취소</option>
+                        <option value="환불">환불</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">사유 <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="bulkCancelReason" rows="2" placeholder="일괄 취소 사유를 입력하세요"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                <button class="btn btn-danger" id="btnBulkCancelSubmit" onclick="submitBulkCancel()">
+                    <i class="bi bi-x-circle"></i> 일괄 취소 실행
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 수량 정정 모달 -->
+<div class="modal fade" id="editQtyModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">수량 정정</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="qtyEditOrderId">
+                <input type="hidden" id="qtyEditOldQty">
+                <div class="mb-2">
+                    <span class="text-muted small">품목:</span> <strong id="qtyEditProductLabel"></strong>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">수량</label>
+                    <input type="number" class="form-control" id="qtyEditQty" min="1">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">변경 사유 <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="qtyEditReason" rows="2" placeholder="변경 사유를 입력하세요"></textarea>
+                </div>
+                <div id="qtyEditReprocessInfo" class="alert alert-info py-2 small" style="display:none;">
+                    <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+                    <strong>출고 처리된 주문</strong> — 수량 변경 시 재고 역분개 + 재처리가 자동 진행됩니다.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                <button class="btn btn-primary" onclick="submitQtyEdit()">저장</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 품목 정정 모달 -->
+<div class="modal fade" id="editProductModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title">품목 정정</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="prodEditOrderId">
+                <input type="hidden" id="prodEditOldProduct">
+                <input type="hidden" id="prodEditOldQty">
+                <input type="hidden" id="prodEditOldUnitPrice">
+                <div class="mb-2">
+                    <span class="text-muted small">현재 품목:</span> <strong id="prodEditOldLabel"></strong>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">변경할 품목 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="prodEditProductName" list="productDatalist"
+                           placeholder="품목명 입력 또는 선택">
+                    <datalist id="productDatalist"></datalist>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-6">
+                        <label class="form-label">수량</label>
+                        <input type="number" class="form-control" id="prodEditQty" min="1">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label">단가</label>
+                        <input type="number" class="form-control" id="prodEditUnitPrice" min="0">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">변경 사유 <span class="text-danger">*</span></label>
+                    <textarea class="form-control" id="prodEditReason" rows="2" placeholder="변경 사유를 입력하세요"></textarea>
+                </div>
+                <div id="prodEditReprocessInfo" class="alert alert-info py-2 small" style="display:none;">
+                    <i class="bi bi-exclamation-triangle-fill text-warning"></i>
+                    <strong>출고 처리된 주문</strong> — 품목 변경 시:
+                    <ul class="mb-1 mt-1">
+                        <li>기존 품목 재고 복원 (SALES_RETURN)</li>
+                        <li>새 품목으로 재고 차감 (SALES_OUT)</li>
+                        <li>매출 데이터 자동 갱신</li>
+                    </ul>
+                    <span class="text-muted">* 내용물 변경 시 새 송장 출력이 필요할 수 있습니다.</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                <button class="btn btn-warning" onclick="submitProductEdit()">품목 변경</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 송장 입력 모달 -->
+<div class="modal fade" id="invoiceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">송장번호 입력</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="invoiceChannel">
+                <input type="hidden" id="invoiceOrderNo">
+                <div class="mb-3">
+                    <label class="form-label">택배사</label>
+                    <select class="form-select" id="invoiceCourier">
+                        <option value="">선택</option>
+                        <option value="CJ대한통운">CJ대한통운</option>
+                        <option value="한진택배">한진택배</option>
+                        <option value="로젠택배">로젠택배</option>
+                        <option value="우체국택배">우체국택배</option>
+                        <option value="롯데택배">롯데택배</option>
+                        <option value="경동택배">경동택배</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">송장번호 <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="invoiceNo" placeholder="송장번호 입력">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+                <button class="btn btn-primary" onclick="submitInvoice()">저장</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const CSRF = '{{ csrf_token() }}';
+let currentPage = 1;
+const perPage = 50;
+
+// 오늘 날짜 기본값
+document.addEventListener('DOMContentLoaded', () => {
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('filterDateTo').value = today;
+    const week = new Date(); week.setDate(week.getDate() - 7);
+    document.getElementById('filterDateFrom').value = week.toISOString().split('T')[0];
+
+    // 검색대상 변경 시 placeholder 업데이트
+    document.getElementById('filterSearchField').addEventListener('change', function() {
+        const ph = {
+            all: '주문번호/상품명',
+            order_no: '주문번호',
+            product_name: '상품명',
+            invoice: '송장번호',
+            recipient: '수취인명',
+        };
+        document.getElementById('filterSearch').placeholder = ph[this.value] || '검색어 입력';
+    });
+});
+
+function parseJsonSafe(res) {
+    const ct = (res.headers && res.headers.get('content-type')) ? res.headers.get('content-type') : '';
+    if (ct && ct.indexOf('application/json') !== -1) {
+        return res.json();
+    }
+    return res.text().then(function(t) {
+        const snippet = (t || '').slice(0, 300);
+        throw new Error('Unexpected non-JSON response (' + res.status + '). Possibly session expired/CSRF/Server error. Response: ' + snippet);
+    });
+}
+
+function loadOrders() {
+    const searchField = document.getElementById('filterSearchField').value;
+    const params = new URLSearchParams({
+        date_from: document.getElementById('filterDateFrom').value,
+        date_to: document.getElementById('filterDateTo').value,
+        channel: document.getElementById('filterChannel').value,
+        status: document.getElementById('filterStatus').value,
+        outbound: document.getElementById('filterOutbound').value,
+        search: document.getElementById('filterSearch').value,
+        search_field: searchField,
+        page: currentPage,
+        per_page: perPage,
+    });
+
+    const tbody = document.getElementById('ordersBody');
+    tbody.innerHTML = '<tr><td colspan="12" class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div> 조회 중...</td></tr>';
+    document.getElementById('checkAll').checked = false;
+    updateBulkToolbar();
+
+    fetch(`{{ url_for('orders.api_orders') }}?${params}`)
+        .then(parseJsonSafe)
+        .then(data => {
+            const orders = data.orders || [];
+            if (!orders.length) {
+                tbody.innerHTML = '<tr><td colspan="12" class="text-center text-muted py-4">조회 결과 없음</td></tr>';
+                document.getElementById('ordersCount').textContent = '';
+                document.getElementById('pageInfo').textContent = '';
+                document.getElementById('btnPrev').disabled = true;
+                document.getElementById('btnNext').disabled = true;
+                return;
+            }
+
+            tbody.innerHTML = orders.map(o => {
+                const statusBadge = o.status === '정상' ? 'bg-success' :
+                                    o.status === '취소' ? 'bg-danger' : 'bg-warning';
+                const invoiceNo = o.invoice_no || '';
+                const isOutbound = !!o.is_outbound_done;
+                const hasPacking = o.packing_status === 'completed';
+                // 송장 컬럼: 송장번호 표시 또는 미등록
+                const invoiceDisplay = invoiceNo
+                    ? `<span class="text-primary small" title="${invoiceNo}">${invoiceNo.length > 12 ? '...' + invoiceNo.slice(-10) : invoiceNo}</span>`
+                    : '<span class="badge bg-light text-muted border">미등록</span>';
+                // 패킹/출고 상태: 미출고 → 송장등록 → 영상등록(출고)
+                let packingBadge;
+                if (hasPacking) {
+                    // 패킹센터에서 실제 영상 촬영 완료
+                    packingBadge = '<span class="badge bg-success"><i class="bi bi-camera-video-fill"></i> 영상등록</span>';
+                } else if (invoiceNo) {
+                    // 송장번호 있음 → 패킹 대기중
+                    packingBadge = '<span class="badge bg-primary"><i class="bi bi-upc-scan"></i> 송장등록</span>';
+                } else {
+                    // 송장도 없음
+                    packingBadge = '<span class="badge bg-secondary">미출고</span>';
+                }
+                const recipientName = o.recipient_name || '';
+                const canCheck = o.status === '정상';
+                const escProduct = (o.product_name || '').replace(/"/g, '&quot;');
+                return `<tr>
+                    <td>${canCheck
+                        ? `<input type="checkbox" class="form-check-input order-check" value="${o.id}" onchange="updateBulkToolbar()"
+                            data-order-no="${o.order_no || ''}" data-recipient="${recipientName}"
+                            data-product="${escProduct}" data-qty="${o.qty || 0}"
+                            data-outbound="${isOutbound ? '1' : '0'}">`
+                        : ''}
+                    </td>
+                    <td>${o.order_date || ''}</td>
+                    <td><span class="badge bg-secondary">${o.channel || ''}</span></td>
+                    <td class="text-truncate" style="max-width:140px" title="${o.order_no}">${o.order_no || ''}</td>
+                    <td class="small">${recipientName}</td>
+                    <td class="text-truncate" style="max-width:180px" title="${o.product_name}">${o.product_name || ''}</td>
+                    <td class="text-end">${o.qty || 0}</td>
+                    <td class="text-end">${Number(o.total_amount || 0).toLocaleString()}</td>
+                    <td>${invoiceDisplay}</td>
+                    <td>${packingBadge}</td>
+                    <td><span class="badge ${statusBadge}">${o.status}</span></td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="showDetail(${o.id})" title="상세">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                    </td>
+                </tr>`;
+            }).join('');
+
+            document.getElementById('ordersCount').textContent = `${orders.length}건 표시`;
+            document.getElementById('pageInfo').textContent = `${currentPage} 페이지`;
+            document.getElementById('btnPrev').disabled = currentPage <= 1;
+            document.getElementById('btnNext').disabled = orders.length < perPage;
+        })
+        .catch(e => {
+            tbody.innerHTML = `<tr><td colspan="12" class="text-center text-danger py-4">조회 오류: ${e.message}</td></tr>`;
+        });
+}
+
+function changePage(delta) {
+    currentPage = Math.max(1, currentPage + delta);
+    loadOrders();
+}
+
+// ================================================================
+// 주문 상세
+// ================================================================
+
+function showDetail(orderId) {
+    const modal = new bootstrap.Modal(document.getElementById('orderDetailModal'));
+    const body = document.getElementById('orderDetailBody');
+    body.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
+    modal.show();
+
+    fetch(`{{ url_for('orders.api_orders') }}/${orderId}`)
+        .then(parseJsonSafe)
+        .then(data => {
+            const t = data.transaction || {};
+            const s = data.shipping || {};
+            const logs = data.change_log || [];
+            const pj = data.packing_job || null;
+
+            let html = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6><i class="bi bi-receipt"></i> 주문 정보</h6>
+                    <table class="table table-sm">
+                        <tr><th class="w-40">채널</th><td>${t.channel}</td></tr>
+                        <tr><th>주문번호</th><td>${t.order_no}</td></tr>
+                        <tr><th>주문일</th><td>${t.order_date}</td></tr>
+                        <tr><th>상품명</th><td>${t.product_name}</td></tr>
+                        <tr><th>원본 옵션</th><td class="small">${t.original_option || '-'}</td></tr>
+                        <tr><th>수량</th><td><strong>${t.qty}</strong></td></tr>
+                        <tr><th>판매단가</th><td>${Number(t.unit_price||0).toLocaleString()}</td></tr>
+                        <tr><th>주문금액</th><td>${Number(t.total_amount||0).toLocaleString()}</td></tr>
+                        <tr><th>할인액</th><td>${Number(t.discount_amount||0).toLocaleString()}</td></tr>
+                        <tr><th>정산금액</th><td>${Number(t.settlement||0).toLocaleString()}</td></tr>
+                        <tr><th>상태</th><td><span class="badge ${t.status==='정상'?'bg-success':'bg-danger'}">${t.status}</span></td></tr>
+                        ${t.status_reason ? `<tr><th>사유</th><td>${t.status_reason}</td></tr>` : ''}
+                        <tr><th>출고처리</th><td>${
+                            pj
+                                ? '<span class="badge bg-success"><i class="bi bi-camera-video-fill"></i> 영상등록(출고)</span> ' + (t.outbound_date || '')
+                                : (s && s.invoice_no
+                                    ? '<span class="badge bg-primary"><i class="bi bi-upc-scan"></i> 송장등록</span>'
+                                    : '<span class="badge bg-secondary">미출고</span>')
+                        }</td></tr>
+                        ${t.revenue_category ? `<tr><th>매출유형</th><td>${t.revenue_category}</td></tr>` : ''}
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6><i class="bi bi-truck"></i> 배송 정보</h6>`;
+
+            if (s && !s.is_anonymized) {
+                html += `<table class="table table-sm">
+                    <tr><th class="w-40">수취인</th><td>${s.name || '-'}</td></tr>
+                    <tr><th>연락처</th><td>${s.phone || '-'}</td></tr>
+                    <tr><th>주소</th><td class="small">${s.address || '-'}</td></tr>
+                    <tr><th>배송메모</th><td>${s.memo || '-'}</td></tr>
+                    <tr>
+                        <th>송장번호</th>
+                        <td>
+                            <span id="detailInvoice">${s.invoice_no || '<span class="text-muted">미입력</span>'}</span>
+                            <button class="btn btn-sm btn-outline-secondary py-0 px-1 ms-1"
+                                    onclick="openInvoiceModal('${t.channel}','${t.order_no}','${s.invoice_no||''}','${s.courier||''}')"
+                                    title="송장 입력/수정">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    <tr><th>택배사</th><td>${s.courier || '-'}</td></tr>
+                    <tr><th>배송상태</th><td>${s.shipping_status || '-'}</td></tr>
+                </table>`;
+            } else if (s && s.is_anonymized) {
+                html += `<div class="alert alert-secondary py-2">
+                    <i class="bi bi-shield-check"></i> 개인정보 익명화 완료 (${s.anonymized_at ? s.anonymized_at.split('T')[0] : ''})
+                </div>`;
+            } else {
+                html += `<div class="text-muted">배송정보 없음</div>`;
+            }
+
+            // 패킹 정보
+            if (pj) {
+                html += `<hr class="my-2">
+                <h6><i class="bi bi-camera-video-fill text-success"></i> 영상등록 완료</h6>
+                <table class="table table-sm small">
+                    <tr><th class="w-40">상태</th><td><span class="badge bg-success">영상등록(출고)</span></td></tr>
+                    <tr><th>작업자</th><td>${pj.username || '-'}</td></tr>
+                    <tr><th>완료시각</th><td>${pj.completed_at ? pj.completed_at.replace('T',' ').substring(0,19) : '-'}</td></tr>
+                    <tr><th>영상길이</th><td>${pj.video_duration_ms ? Math.round(pj.video_duration_ms/1000) + '초' : '-'}</td></tr>
+                </table>`;
+            } else if (s && s.invoice_no) {
+                html += `<div class="alert alert-info py-2 small mt-2">
+                    <i class="bi bi-upc-scan"></i> <strong>송장등록</strong> — 패킹센터에서 바코드 스캔 + 영상 촬영하면 <strong>영상등록(출고)</strong>으로 전환됩니다.
+                </div>`;
+            } else {
+                html += `<div class="alert alert-secondary py-2 small mt-2">
+                    <i class="bi bi-dash-circle"></i> <strong>미출고</strong> — 송장번호 등록 후 패킹 촬영이 필요합니다.
+                </div>`;
+            }
+
+            html += `</div></div>`;
+
+            // 변경 이력
+            if (logs.length) {
+                html += `<hr><h6><i class="bi bi-clock-history"></i> 변경 이력</h6>
+                <div class="table-responsive" style="max-height:200px;overflow-y:auto">
+                <table class="table table-sm small">
+                    <thead><tr><th>일시</th><th>유형</th><th>필드</th><th>이전</th><th>이후</th><th>사유</th><th>처리자</th></tr></thead>
+                    <tbody>`;
+                logs.forEach(l => {
+                    html += `<tr>
+                        <td>${l.changed_at ? l.changed_at.replace('T',' ').substring(0,19) : ''}</td>
+                        <td>${l.change_type}</td>
+                        <td>${l.field_name || '-'}</td>
+                        <td>${l.before_value || '-'}</td>
+                        <td>${l.after_value || '-'}</td>
+                        <td>${l.change_reason || '-'}</td>
+                        <td>${l.changed_by || '-'}</td>
+                    </tr>`;
+                });
+                html += `</tbody></table></div>`;
+            }
+
+            // 액션 버튼
+            if (t.status === '정상') {
+                const escProduct = (t.product_name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                html += `<hr><div class="d-flex gap-2 flex-wrap">
+                    <button class="btn btn-sm btn-outline-primary" onclick="openQtyEdit(${t.id}, ${t.qty}, '${escProduct}', ${t.is_outbound_done ? 'true' : 'false'})">
+                        <i class="bi bi-123"></i> 수량 정정
+                    </button>
+                    <button class="btn btn-sm btn-outline-warning" onclick="openProductEdit(${t.id}, '${escProduct}', ${t.qty}, ${t.unit_price||0}, ${t.is_outbound_done ? 'true' : 'false'})">
+                        <i class="bi bi-arrow-repeat"></i> 품목 정정
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger" onclick="openCancel(${t.id}, ${t.is_outbound_done ? 'true' : 'false'})">
+                        <i class="bi bi-x-circle"></i> 취소/환불
+                    </button>
+                </div>`;
+            }
+
+            body.innerHTML = html;
+        })
+        .catch(e => {
+            body.innerHTML = `<div class="alert alert-danger">오류: ${e.message}</div>`;
+        });
+}
+
+// ================================================================
+// 취소/환불
+// ================================================================
+
+function openCancel(orderId, isOutboundDone) {
+    bootstrap.Modal.getInstance(document.getElementById('orderDetailModal')).hide();
+    document.getElementById('cancelOrderId').value = orderId;
+    document.getElementById('cancelReason').value = '';
+    document.getElementById('cancelOutboundInfo').style.display = isOutboundDone ? 'block' : 'none';
+    document.getElementById('cancelNotShippedInfo').style.display = isOutboundDone ? 'none' : 'block';
+    new bootstrap.Modal(document.getElementById('cancelModal')).show();
+}
+
+function submitCancel() {
+    const orderId = document.getElementById('cancelOrderId').value;
+    const type = document.getElementById('cancelType').value;
+    const reason = document.getElementById('cancelReason').value.trim();
+
+    if (!reason) { alert('사유를 입력하세요'); return; }
+
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = '처리 중...';
+
+    fetch(`{{ url_for('orders.api_orders') }}/${orderId}/cancel`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': CSRF
+        },
+        body: JSON.stringify({ type, reason })
+    })
+    .then(parseJsonSafe)
+    .then(data => {
+        btn.disabled = false;
+        btn.textContent = '확인';
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('cancelModal')).hide();
+            let msg = `${type} 처리 완료`;
+            if (data.reversal) {
+                const rv = data.reversal;
+                msg += `\n\n[재고/매출 역분개]\n`;
+                msg += `- 재고 복원: ${rv.stock_reversed || 0}건 (SALES_RETURN)\n`;
+                msg += `- 매출 삭제: ${rv.revenue_reversed || 0}건`;
+                if (rv.errors && rv.errors.length) {
+                    msg += `\n- 경고: ${rv.errors.join(', ')}`;
+                }
+            }
+            alert(msg);
+            loadOrders();
+        } else {
+            alert(data.error || '처리 실패');
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.textContent = '확인';
+        alert('오류: ' + e.message);
+    });
+}
+
+// ================================================================
+// 일괄 선택 / 일괄 취소
+// ================================================================
+
+function toggleAll(masterCb) {
+    document.querySelectorAll('.order-check').forEach(cb => { cb.checked = masterCb.checked; });
+    updateBulkToolbar();
+}
+
+function getSelectedCheckboxes() {
+    return Array.from(document.querySelectorAll('.order-check:checked'));
+}
+
+function updateBulkToolbar() {
+    const checked = getSelectedCheckboxes();
+    const toolbar = document.getElementById('bulkToolbar');
+    if (checked.length > 0) {
+        toolbar.style.cssText = '';  // show
+        document.getElementById('bulkSelectedCount').textContent = checked.length;
+    } else {
+        toolbar.style.cssText = 'display:none !important';
+    }
+    // sync master checkbox
+    const all = document.querySelectorAll('.order-check');
+    const master = document.getElementById('checkAll');
+    if (all.length && checked.length === all.length) {
+        master.checked = true; master.indeterminate = false;
+    } else if (checked.length > 0) {
+        master.checked = false; master.indeterminate = true;
+    } else {
+        master.checked = false; master.indeterminate = false;
+    }
+}
+
+function clearSelection() {
+    document.querySelectorAll('.order-check').forEach(cb => { cb.checked = false; });
+    document.getElementById('checkAll').checked = false;
+    document.getElementById('checkAll').indeterminate = false;
+    updateBulkToolbar();
+}
+
+function openBulkCancel() {
+    const checked = getSelectedCheckboxes();
+    if (!checked.length) { alert('취소할 주문을 선택하세요'); return; }
+
+    let outboundCount = 0;
+    const listHtml = checked.map(cb => {
+        const isOutbound = cb.dataset.outbound === '1';
+        if (isOutbound) outboundCount++;
+        return `<tr>
+            <td>${cb.dataset.orderNo}</td>
+            <td>${cb.dataset.recipient}</td>
+            <td class="text-truncate" style="max-width:200px">${cb.dataset.product}</td>
+            <td class="text-end">${cb.dataset.qty}</td>
+            <td>${isOutbound ? '<span class="badge bg-success">완료</span>' : '<span class="badge bg-secondary">미출고</span>'}</td>
+        </tr>`;
+    }).join('');
+
+    document.getElementById('bulkCancelCount').textContent = checked.length;
+    document.getElementById('bulkCancelList').innerHTML = listHtml;
+    document.getElementById('bulkCancelReason').value = '';
+
+    if (outboundCount > 0) {
+        document.getElementById('bulkOutboundWarn').style.display = '';
+        document.getElementById('bulkOutboundCount').textContent = outboundCount;
+    } else {
+        document.getElementById('bulkOutboundWarn').style.display = 'none';
+    }
+
+    new bootstrap.Modal(document.getElementById('bulkCancelModal')).show();
+}
+
+function submitBulkCancel() {
+    const checked = getSelectedCheckboxes();
+    const type = document.getElementById('bulkCancelType').value;
+    const reason = document.getElementById('bulkCancelReason').value.trim();
+
+    if (!reason) { alert('사유를 입력하세요'); return; }
+    if (!confirm(`${checked.length}건의 주문을 ${type} 처리합니다.\n정말 진행하시겠습니까?`)) return;
+
+    const btn = document.getElementById('btnBulkCancelSubmit');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 처리 중...';
+
+    const orderIds = checked.map(cb => parseInt(cb.value));
+
+    fetch('{{ url_for("orders.api_orders_bulk_cancel") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': CSRF
+        },
+        body: JSON.stringify({ order_ids: orderIds, type, reason })
+    })
+    .then(parseJsonSafe)
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-x-circle"></i> 일괄 취소 실행';
+
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('bulkCancelModal')).hide();
+            let msg = `일괄 ${type} 완료\n\n`;
+            msg += `- 성공: ${data.success_count}건\n`;
+            if (data.fail_count > 0) msg += `- 실패: ${data.fail_count}건\n`;
+            if (data.total_stock_reversed > 0)
+                msg += `- 재고 복원: ${data.total_stock_reversed}건 (SALES_RETURN)\n`;
+            if (data.total_revenue_reversed > 0)
+                msg += `- 매출 삭제: ${data.total_revenue_reversed}건\n`;
+
+            // 실패 상세
+            if (data.fail_count > 0) {
+                const fails = (data.results || []).filter(r => !r.ok);
+                msg += `\n[실패 상세]\n`;
+                fails.forEach(f => { msg += `- #${f.order_id}: ${f.error}\n`; });
+            }
+            alert(msg);
+            clearSelection();
+            loadOrders();
+        } else {
+            alert(data.error || '일괄 취소 실패');
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-x-circle"></i> 일괄 취소 실행';
+        alert('오류: ' + e.message);
+    });
+}
+
+// ================================================================
+// 수량 정정
+// ================================================================
+
+function openQtyEdit(orderId, currentQty, productName, isOutboundDone) {
+    bootstrap.Modal.getInstance(document.getElementById('orderDetailModal')).hide();
+    document.getElementById('qtyEditOrderId').value = orderId;
+    document.getElementById('qtyEditOldQty').value = currentQty;
+    document.getElementById('qtyEditProductLabel').textContent = productName || '';
+    document.getElementById('qtyEditQty').value = currentQty;
+    document.getElementById('qtyEditReason').value = '';
+    document.getElementById('qtyEditReprocessInfo').style.display = isOutboundDone ? 'block' : 'none';
+    new bootstrap.Modal(document.getElementById('editQtyModal')).show();
+}
+
+function submitQtyEdit() {
+    const orderId = document.getElementById('qtyEditOrderId').value;
+    const oldQty = parseInt(document.getElementById('qtyEditOldQty').value);
+    const newQty = parseInt(document.getElementById('qtyEditQty').value);
+    const reason = document.getElementById('qtyEditReason').value.trim();
+
+    if (!reason) { alert('변경 사유를 입력하세요'); return; }
+    if (newQty <= 0) { alert('수량은 1 이상이어야 합니다'); return; }
+    if (newQty === oldQty) { alert('수량이 변경되지 않았습니다'); return; }
+
+    const btn = event.target;
+    btn.disabled = true; btn.textContent = '저장 중...';
+
+    fetch(`{{ url_for('orders.api_orders') }}/${orderId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+        body: JSON.stringify({ payload: { qty: newQty }, reason })
+    })
+    .then(parseJsonSafe)
+    .then(data => {
+        btn.disabled = false; btn.textContent = '저장';
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editQtyModal')).hide();
+            let msg = `수량 정정 완료 (${oldQty} → ${newQty})`;
+            if (data.reversal) msg += `\n재고 복원: ${data.reversal.stock_reversed || 0}건`;
+            if (data.reprocess) msg += `\n재출고: ${data.reprocess.outbound_count || 0}건`;
+            alert(msg);
+            loadOrders();
+        } else { alert(data.error || '수정 실패'); }
+    })
+    .catch(e => { btn.disabled = false; btn.textContent = '저장'; alert('오류: ' + e.message); });
+}
+
+// ================================================================
+// 품목 정정
+// ================================================================
+
+let _productListLoaded = false;
+function loadProductList() {
+    if (_productListLoaded) return;
+    fetch('{{ url_for("orders.api_product_list") }}')
+        .then(r => r.json())
+        .then(data => {
+            const dl = document.getElementById('productDatalist');
+            dl.innerHTML = (data.products || []).map(p => `<option value="${p}">`).join('');
+            _productListLoaded = true;
+        })
+        .catch(() => {});
+}
+
+function openProductEdit(orderId, currentProduct, currentQty, currentUnitPrice, isOutboundDone) {
+    bootstrap.Modal.getInstance(document.getElementById('orderDetailModal')).hide();
+    loadProductList();
+    document.getElementById('prodEditOrderId').value = orderId;
+    document.getElementById('prodEditOldProduct').value = currentProduct || '';
+    document.getElementById('prodEditOldQty').value = currentQty;
+    document.getElementById('prodEditOldUnitPrice').value = currentUnitPrice || 0;
+    document.getElementById('prodEditOldLabel').textContent = currentProduct || '';
+    document.getElementById('prodEditProductName').value = '';
+    document.getElementById('prodEditQty').value = currentQty;
+    document.getElementById('prodEditUnitPrice').value = currentUnitPrice || 0;
+    document.getElementById('prodEditReason').value = '';
+    document.getElementById('prodEditReprocessInfo').style.display = isOutboundDone ? 'block' : 'none';
+    new bootstrap.Modal(document.getElementById('editProductModal')).show();
+}
+
+function submitProductEdit() {
+    const orderId = document.getElementById('prodEditOrderId').value;
+    const oldProduct = document.getElementById('prodEditOldProduct').value;
+    const oldQty = parseInt(document.getElementById('prodEditOldQty').value);
+    const oldUnitPrice = parseInt(document.getElementById('prodEditOldUnitPrice').value) || 0;
+    const newProduct = document.getElementById('prodEditProductName').value.trim();
+    const newQty = parseInt(document.getElementById('prodEditQty').value);
+    const newUnitPrice = parseInt(document.getElementById('prodEditUnitPrice').value) || 0;
+    const reason = document.getElementById('prodEditReason').value.trim();
+
+    if (!newProduct) { alert('변경할 품목을 선택하세요'); return; }
+    if (newProduct === oldProduct && newQty === oldQty && newUnitPrice === oldUnitPrice) {
+        alert('변경된 내용이 없습니다'); return;
+    }
+    if (!reason) { alert('변경 사유를 입력하세요'); return; }
+    if (newQty <= 0) { alert('수량은 1 이상이어야 합니다'); return; }
+
+    const payload = {};
+    let changes = [];
+    if (newProduct !== oldProduct) { payload.product_name = newProduct; changes.push(`품목: ${oldProduct} → ${newProduct}`); }
+    if (newQty !== oldQty) { payload.qty = newQty; changes.push(`수량: ${oldQty} → ${newQty}`); }
+    if (newUnitPrice !== oldUnitPrice) {
+        payload.unit_price = newUnitPrice;
+        payload.total_amount = newQty * newUnitPrice;
+        changes.push(`단가: ${oldUnitPrice.toLocaleString()} → ${newUnitPrice.toLocaleString()}`);
+    }
+
+    const btn = event.target;
+    btn.disabled = true; btn.textContent = '처리 중...';
+
+    fetch(`{{ url_for('orders.api_orders') }}/${orderId}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF },
+        body: JSON.stringify({ payload, reason })
+    })
+    .then(parseJsonSafe)
+    .then(data => {
+        btn.disabled = false; btn.textContent = '품목 변경';
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('editProductModal')).hide();
+            let msg = `품목 정정 완료\n${changes.join('\n')}`;
+            if (data.reversal) {
+                msg += `\n\n[재고 처리]`;
+                msg += `\n- 기존 품목 재고 복원: ${data.reversal.stock_reversed || 0}건`;
+            }
+            if (data.reprocess) {
+                msg += `\n- 새 품목 재고 차감: ${data.reprocess.outbound_count || 0}건`;
+            }
+            if (data.reversal || data.reprocess) {
+                msg += `\n\n※ 내용물 변경 — 새 송장 출력이 필요할 수 있습니다.`;
+            }
+            alert(msg);
+            loadOrders();
+        } else { alert(data.error || '품목 정정 실패'); }
+    })
+    .catch(e => { btn.disabled = false; btn.textContent = '품목 변경'; alert('오류: ' + e.message); });
+}
+
+// ================================================================
+// 송장번호 입력/수정
+// ================================================================
+
+function openInvoiceModal(channel, orderNo, currentInvoice, currentCourier) {
+    document.getElementById('invoiceChannel').value = channel;
+    document.getElementById('invoiceOrderNo').value = orderNo;
+    document.getElementById('invoiceNo').value = currentInvoice || '';
+    document.getElementById('invoiceCourier').value = currentCourier || '';
+    new bootstrap.Modal(document.getElementById('invoiceModal')).show();
+}
+
+function submitInvoice() {
+    const channel = document.getElementById('invoiceChannel').value;
+    const orderNo = document.getElementById('invoiceOrderNo').value;
+    const invoiceNo = document.getElementById('invoiceNo').value.trim();
+    const courier = document.getElementById('invoiceCourier').value;
+
+    if (!invoiceNo) { alert('송장번호를 입력하세요'); return; }
+
+    const btn = event.target;
+    btn.disabled = true;
+    btn.textContent = '저장 중...';
+
+    fetch('{{ url_for("orders.api_update_invoice") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': CSRF
+        },
+        body: JSON.stringify({ channel, order_no: orderNo, invoice_no: invoiceNo, courier })
+    })
+    .then(parseJsonSafe)
+    .then(data => {
+        btn.disabled = false;
+        btn.textContent = '저장';
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('invoiceModal')).hide();
+            // 상세 모달의 송장번호도 갱신
+            const detailInvoice = document.getElementById('detailInvoice');
+            if (detailInvoice) detailInvoice.textContent = invoiceNo;
+            alert('송장번호 저장 완료');
+        } else {
+            alert(data.error || '저장 실패');
+        }
+    })
+    .catch(e => {
+        btn.disabled = false;
+        btn.textContent = '저장';
+        alert('오류: ' + e.message);
+    });
+}
+
+// ================================================================
+// 업로드 이력
+// ================================================================
+
+function loadImportRuns() {
+    fetch('{{ url_for("orders.api_import_runs") }}')
+        .then(parseJsonSafe)
+        .then(data => {
+            const tbody = document.getElementById('importsBody');
+            const runs = data.runs || [];
+            if (!runs.length) {
+                tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-4">업로드 이력 없음</td></tr>';
+                return;
+            }
+            tbody.innerHTML = runs.map(r => {
+                const statusBadge = r.status === 'completed' ? 'bg-success' :
+                                    r.status === 'partial' ? 'bg-warning' :
+                                    r.status === 'failed' ? 'bg-danger' : 'bg-info';
+                const statusLabel = r.status === 'completed' ? '완료' :
+                                    r.status === 'partial' ? '부분' :
+                                    r.status === 'failed' ? '실패' : '처리중';
+                return `<tr>
+                    <td>${r.created_at ? r.created_at.replace('T',' ').substring(0,19) : ''}</td>
+                    <td><span class="badge bg-secondary">${r.channel}</span></td>
+                    <td class="text-truncate small" style="max-width:200px" title="${r.filename}">${r.filename || '-'}</td>
+                    <td>${r.uploaded_by || '-'}</td>
+                    <td class="text-end">${r.total_rows || 0}</td>
+                    <td class="text-end text-success">${r.success_count || 0}</td>
+                    <td class="text-end text-warning">${r.changed_count || 0}</td>
+                    <td class="text-end text-danger">${r.fail_count || 0}</td>
+                    <td><span class="badge ${statusBadge}">${statusLabel}</span></td>
+                </tr>`;
+            }).join('');
+        })
+        .catch(e => console.error(e));
+}
+
+// ─── API연동 탭 ───
+function loadApiStatus() {
+    // 기본 날짜 설정
+    if (!document.getElementById('apiDateTo').value) {
+        const today = new Date();
+        const ago = new Date(today);
+        ago.setDate(ago.getDate() - 1);
+        document.getElementById('apiDateTo').value = today.toISOString().slice(0, 10);
+        document.getElementById('apiDateFrom').value = ago.toISOString().slice(0, 10);
+        document.getElementById('apiCollDate').value = today.toISOString().slice(0, 10);
+    }
+    fetch('/orders/api/api-status', { headers: {'X-CSRFToken': CSRF} })
+    .then(r => r.json())
+    .then(data => {
+        const div = document.getElementById('apiChannelStatus');
+        let html = '';
+        for (const [ch, st] of Object.entries(data)) {
+            const cls = st.ready ? 'bg-success' : 'bg-secondary';
+            const label = st.ready ? '연결됨' : (st.reason || '미연결');
+            html += `<span class="badge ${cls} me-2">${ch}: ${label}</span>`;
+        }
+        div.innerHTML = html || '<span class="text-muted">연결된 채널 없음</span>';
+    })
+    .catch(() => {
+        document.getElementById('apiChannelStatus').innerHTML = '<span class="text-danger">상태 조회 실패</span>';
+    });
+}
+
+function _apiFormData() {
+    const fd = new FormData();
+    fd.append('channel', document.getElementById('apiChannel').value);
+    fd.append('date_from', document.getElementById('apiDateFrom').value);
+    fd.append('date_to', document.getElementById('apiDateTo').value);
+    fd.append('collection_date', document.getElementById('apiCollDate').value);
+    return fd;
+}
+
+function apiDownloadPreview() {
+    const btn = document.getElementById('btnApiPreview');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 생성 중...';
+
+    fetch('/orders/api/api-collect-download', {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF},
+        body: _apiFormData(),
+    })
+    .then(r => {
+        if (!r.ok) return r.json().then(d => { throw new Error(d.error || 'HTTP ' + r.status); });
+        const ct = r.headers.get('content-type') || '';
+        if (ct.includes('json')) return r.json().then(d => { throw new Error(d.error || '파일 없음'); });
+        const cd = r.headers.get('content-disposition') || '';
+        const match = cd.match(/filename\*?=(?:UTF-8'')?([^;\n]+)/i);
+        const fname = match ? decodeURIComponent(match[1].replace(/"/g, '')) : 'api_invoice.zip';
+        return r.blob().then(blob => { _downloadBlob(blob, fname); });
+    })
+    .then(() => {
+        document.getElementById('apiResult').style.display = 'block';
+        document.getElementById('apiResult').innerHTML = '<div class="alert alert-success py-2">송장 파일 다운로드 완료 (DB 미반영)</div>';
+    })
+    .catch(e => {
+        document.getElementById('apiResult').style.display = 'block';
+        document.getElementById('apiResult').innerHTML = `<div class="alert alert-danger py-2">${e.message}</div>`;
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-eye"></i> 미리보기 (송장 다운로드)';
+    });
+}
+
+function _downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function apiCollectAndSave() {
+    if (!confirm('API 주문을 수집하여 DB에 저장하고 재고를 차감합니다.\n계속하시겠습니까?')) return;
+
+    const btn = document.getElementById('btnApiCollect');
+    const prog = document.getElementById('apiProgress');
+    const progText = document.getElementById('apiProgressText');
+    const result = document.getElementById('apiResult');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 처리 중...';
+    prog.classList.remove('d-none');
+    progText.textContent = 'API 주문 수집 + DB 저장 중... (최대 3분)';
+    result.style.display = 'none';
+
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 180000);
+
+    fetch('/orders/api/api-collect', {
+        method: 'POST',
+        headers: {'X-CSRFToken': CSRF},
+        body: _apiFormData(),
+        signal: ctrl.signal,
+    })
+    .then(r => r.json())
+    .then(data => {
+        result.style.display = 'block';
+        let html = '';
+        const results = data.results || {};
+        let hasError = false;
+        let hasSuccess = false;
+
+        for (const [ch, r] of Object.entries(results)) {
+            if (r.success) {
+                hasSuccess = true;
+                html += `<div class="alert alert-success py-2 mb-2">
+                    <strong>${ch}</strong>: ${r.fetched}건 수집 → 신규 ${r.inserted||0}건, 변경 ${r.updated||0}건, 스킵 ${r.skipped||0}건
+                    ${r.import_run_id ? `<button class="btn btn-outline-danger btn-sm ms-2 py-0" onclick="apiRollback('${r.import_run_id}','${ch}')"><i class="bi bi-arrow-counterclockwise"></i> 롤백</button>` : ''}
+                </div>`;
+            } else if (r.unmatched) {
+                hasError = true;
+                const rbBadge = r.rolled_back
+                    ? '<span class="badge bg-info ms-2">자동 롤백 완료 (재고 복원)</span>'
+                    : '';
+                const unmatchedList = r.unmatched.slice(0, 20).map(u => `<li>${u}</li>`).join('');
+                html += `<div class="alert alert-warning py-2 mb-2">
+                    <strong>${ch}</strong>: ${r.error} ${rbBadge}
+                    <div class="mt-2"><strong>미매칭 항목 (옵션마스터 등록 필요):</strong></div>
+                    <ul class="small mb-1" style="max-height:150px;overflow-y:auto">${unmatchedList}</ul>
+                    <div class="small text-muted">옵션마스터에 위 항목을 등록한 후 다시 수집하세요.</div>
+                </div>`;
+            } else {
+                hasError = true;
+                html += `<div class="alert alert-danger py-2 mb-2">
+                    <strong>${ch}</strong>: ${r.error || '실패'}
+                    ${r.rollback ? '<span class="badge bg-info">자동 롤백 완료</span>' : ''}
+                </div>`;
+            }
+        }
+
+        if (!html) html = '<div class="alert alert-secondary py-2">수집된 주문 없음</div>';
+        result.innerHTML = html;
+
+        // 성공 시 주문목록 새로고침
+        if (hasSuccess) setTimeout(() => loadOrders(), 500);
+    })
+    .catch(e => {
+        result.style.display = 'block';
+        const msg = e.name === 'AbortError' ? '시간 초과 (3분). 기간을 줄여 재시도하세요.' : e.message;
+        result.innerHTML = `<div class="alert alert-danger py-2">${msg}</div>`;
+    })
+    .finally(() => {
+        clearTimeout(timer);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-cloud-arrow-down"></i> API 주문수집 + DB저장';
+        prog.classList.add('d-none');
+    });
+}
+
+function apiRollback(runId, channel) {
+    if (!confirm(`${channel} 주문수집을 롤백합니다.\n(주문 취소 + 재고 복원)\n계속하시겠습니까?`)) return;
+
+    fetch('/orders/api/api-collect-rollback', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF},
+        body: JSON.stringify({import_run_id: runId}),
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.error) {
+            alert('롤백 실패: ' + data.error);
+        } else {
+            alert(`롤백 완료: 취소 ${data.cancelled_orders||0}건, 재고복원 ${data.stock_ledger_deleted||0}건`);
+            loadOrders();
+        }
+    })
+    .catch(e => alert('롤백 오류: ' + e));
+}
+
+// ================================================================
+// ③ CJ 송장 등록
+// ================================================================
+function loadCjStatus() {
+    fetch('/shipping/api/pending-invoices', {headers:{'Accept':'application/json'}})
+    .then(r => r.json())
+    .then(d => {
+        const b = document.getElementById('pushPendingBadge');
+        const counts = d.counts || d;
+        let total = 0;
+        let parts = [];
+        for (const [ch, cnt] of Object.entries(counts)) {
+            total += cnt;
+            parts.push(`${ch}:${cnt}`);
+        }
+        b.textContent = `push 가능 ${total}건`;
+        b.title = parts.join(', ');
+        b.className = total > 0 ? 'badge bg-warning text-dark ms-1' : 'badge bg-success ms-1';
+    }).catch(() => {});
+}
+
+function cjAutoGenerate() {
+    const ch = document.getElementById('apiChannel').value;
+    const btn = document.getElementById('btnCjAuto');
+    console.log('[CJ] cjAutoGenerate called, channel:', ch);
+    if (!confirm('CJ에 운송장 채번 + 예약접수를 실행합니다. 계속?')) return;
+    console.log('[CJ] confirm OK, sending request...');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> CJ 생성 중...';
+
+    const fd = new FormData();
+    fd.append('csrf_token', CSRF);
+    fd.append('channel', ch === 'all' ? '' : ch);
+    fd.append('limit', '100');
+
+    fetch('/shipping/api/cj-generate-invoices', {
+        method: 'POST', headers: {'X-CSRFToken': CSRF}, body: fd
+    })
+    .then(r => r.json())
+    .then(d => {
+        const el = document.getElementById('cjGenResult');
+        el.style.display = 'block';
+        if (d.error) {
+            el.innerHTML = `<div class="alert alert-danger py-1">${d.error}</div>`;
+        } else {
+            el.innerHTML = `<div class="alert alert-${d.failed > 0 ? 'warning' : 'success'} py-1">CJ 생성: 성공 ${d.success}건 / 실패 ${d.failed}건 (총 ${d.total}건)</div>`;
+        }
+        loadCjStatus();
+    })
+    .catch(e => {
+        document.getElementById('cjGenResult').style.display = 'block';
+        document.getElementById('cjGenResult').innerHTML = `<div class="alert alert-danger py-1">${e}</div>`;
+    })
+    .finally(() => { btn.disabled = false; btn.innerHTML = '<i class="bi bi-lightning"></i> CJ API 자동생성'; });
+}
+
+function cjUploadExcel() {
+    const fileInput = document.getElementById('cjFile');
+    if (!fileInput.files.length) { alert('CJ 엑셀 파일을 선택하세요'); return; }
+
+    const btn = document.getElementById('btnCjUpload');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+    const fd = new FormData();
+    fd.append('csrf_token', CSRF);
+    fd.append('file', fileInput.files[0]);
+
+    fetch('/shipping/api/cj-tracking-upload', {
+        method: 'POST', headers: {'X-CSRFToken': CSRF}, body: fd
+    })
+    .then(r => r.json())
+    .then(d => {
+        const el = document.getElementById('cjGenResult');
+        el.style.display = 'block';
+        if (d.ok) {
+            el.innerHTML = `<div class="alert alert-success py-1">CJ 매칭: ${d.matched}건 / 전체 ${d.total}건 → DB반영 ${d.success}건</div>`;
+        } else {
+            el.innerHTML = `<div class="alert alert-danger py-1">${d.error}</div>`;
+        }
+        loadCjStatus();
+    })
+    .catch(e => alert('업로드 오류: ' + e))
+    .finally(() => { btn.disabled = false; btn.innerHTML = '<i class="bi bi-upload"></i> CJ 엑셀 매칭'; });
+}
+
+// ================================================================
+// ④ 마켓 송장등록
+// ================================================================
+function pushToMarket() {
+    const ch = document.getElementById('pushChannel').value;
+    const btn = document.getElementById('btnPush');
+    if (!confirm(`${ch} 채널에 송장을 전송합니다.\n계속하시겠습니까?`)) return;
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 전송 중...';
+
+    const fd = new FormData();
+    fd.append('csrf_token', CSRF);
+    fd.append('channel', ch);
+
+    fetch('/shipping/push-invoices', {
+        method: 'POST', headers: {'X-CSRFToken': CSRF}, body: fd
+    })
+    .then(r => r.json())
+    .then(d => {
+        const el = document.getElementById('pushResult');
+        el.style.display = 'block';
+        if (d.error) {
+            el.innerHTML = `<div class="alert alert-danger py-1">${d.error}</div>`;
+        } else {
+            const msg = `성공 ${d.success||0}건 / 실패 ${d.failed||0}건 (총 ${d.total||0}건)`;
+            el.innerHTML = `<div class="alert alert-${d.failed > 0 ? 'warning' : 'success'} py-1">${msg}</div>`;
+            if (d.errors && d.errors.length) {
+                el.innerHTML += `<div class="text-danger small">${d.errors.slice(0,3).join('<br>')}</div>`;
+            }
+        }
+        loadCjStatus();
+    })
+    .catch(e => alert('전송 오류: ' + e))
+    .finally(() => { btn.disabled = false; btn.innerHTML = '<i class="bi bi-send"></i> API 송장 전송'; });
+}
+
+function downloadMarketFile() {
+    const ch = document.getElementById('pushChannel').value;
+    window.open(`/shipping/api/download-invoice-file/${encodeURIComponent(ch)}`, '_blank');
+}
+
+// API연동 탭 열릴 때 상태 로드
+document.addEventListener('DOMContentLoaded', () => {
+    const apiTab = document.querySelector('[data-bs-target="#tabApiSync"]');
+    if (apiTab) {
+        apiTab.addEventListener('shown.bs.tab', () => { loadCjStatus(); });
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,517 @@
+{% extends "base.html" %}
+{% block title %}거래처 관리 - 배마마 통합시스템{% endblock %}
+{% block page_title %}거래처 관리{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+    <!-- 거래처 목록 -->
+    <div class="col-lg-12">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-building"></i> 거래처 목록 ({{ partners|default([])|length }}건)</span>
+                <div class="d-flex gap-2 align-items-center">
+                    {% if current_user.role != 'admin' %}
+                    <button class="edit-mode-toggle view-mode" id="btnEditModeToggle" onclick="toggleEditMode()">🔒 보기모드</button>
+                    {% endif %}
+                    <button class="btn btn-sm btn-success action-btn" data-bs-toggle="collapse" data-bs-target="#excelUploadArea">
+                        <i class="bi bi-file-earmark-excel"></i> 엑셀 일괄등록
+                    </button>
+                    <button class="btn btn-sm btn-primary action-btn" data-bs-toggle="modal" data-bs-target="#addPartnerModal">
+                        <i class="bi bi-plus-lg"></i> 거래처 추가
+                    </button>
+                </div>
+            </div>
+            <!-- 엑셀 일괄등록 영역 -->
+            <div class="collapse" id="excelUploadArea">
+                <div class="card-body border-bottom bg-light">
+                    <form method="POST" action="{{ url_for('trade.upload_partners') }}" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <div class="row align-items-end g-2">
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">엑셀 파일</label>
+                                <input type="file" name="file" class="form-control form-control-sm" accept=".xlsx,.xls" required>
+                                <div class="form-text">컬럼: 업체명, 소재지, 담당자, 연락처, 팩스번호, 이메일, 사업자등록번호, 비고</div>
+                            </div>
+                            <div class="col-md-3">
+                                <button type="submit" class="btn btn-success btn-sm w-100">
+                                    <i class="bi bi-upload"></i> 일괄 등록
+                                </button>
+                            </div>
+                            <div class="col-md-3">
+                                <a href="{{ url_for('trade.download_partner_template') }}" class="btn btn-outline-secondary btn-sm w-100">
+                                    <i class="bi bi-download"></i> 양식 다운로드
+                                </a>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive" style="max-height:500px; overflow-y:auto;">
+                    <table class="table table-hover table-sm mb-0" id="partnerTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th>거래처명</th>
+                                <th>사업자번호</th>
+                                <th>대표자</th>
+                                <th>담당자</th>
+                                <th>연락처</th>
+                                <th>팩스</th>
+                                <th>이메일</th>
+                                <th>주소</th>
+                                <th>유형</th>
+                                <th>비고</th>
+                                <th style="width:130px">관리</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in partners|default([]) %}
+                            <tr data-id="{{ p.id }}" data-mode="view">
+                                <!-- 보기모드 -->
+                                <td data-field="partner_name">
+                                    <span class="view-val"><strong>{{ p.partner_name }}</strong></span>
+                                    <input type="text" class="form-control form-control-sm edit-input d-none"
+                                           value="{{ p.partner_name|default('') }}">
+                                </td>
+                                <td data-field="business_number">
+                                    <span class="view-val">{{ p.business_number|default('-') }}</span>
+                                    <input type="text" class="form-control form-control-sm edit-input d-none"
+                                           value="{{ p.business_number|default('') }}" placeholder="000-00-00000">
+                                </td>
+                                <td data-field="representative">
+                                    <span class="view-val">{{ p.representative|default('-') }}</span>
+                                    <input type="text" class="form-control form-control-sm edit-input d-none"
+                                           value="{{ p.representative|default('') }}">
+                                </td>
+                                <td data-field="contact_person">
+                                    <span class="view-val">{{ p.contact_person|default('-') }}</span>
+                                    <input type="text" class="form-control form-control-sm edit-input d-none"
+                                           value="{{ p.contact_person|default('') }}">
+                                </td>
+                                <td data-field="phone">
+                                    <span class="view-val">{{ p.phone|default('-') }}</span>
+                                    <input type="text" class="form-control form-control-sm edit-input d-none"
+                                           value="{{ p.phone|default('') }}">
+                                </td>
+                                <td data-field="fax">
+                                    <span class="view-val">{{ p.fax|default('-') }}</span>
+                                    <input type="text" class="form-control form-control-sm edit-input d-none"
+                                           value="{{ p.fax|default('') }}">
+                                </td>
+                                <td data-field="email">
+                                    <span class="view-val">{{ p.email|default('-') }}</span>
+                                    <input type="email" class="form-control form-control-sm edit-input d-none"
+                                           value="{{ p.email|default('') }}">
+                                </td>
+                                <td data-field="address">
+                                    <span class="view-val"><small>{{ p.address|default('-') }}</small></span>
+                                    <input type="text" class="form-control form-control-sm edit-input d-none"
+                                           value="{{ p.address|default('') }}">
+                                </td>
+                                <td data-field="type">
+                                    <span class="view-val">
+                                        {% if p.type == '매입' %}
+                                            <span class="badge bg-primary">매입</span>
+                                        {% elif p.type == '매출' %}
+                                            <span class="badge bg-success">매출</span>
+                                        {% else %}
+                                            <span class="badge bg-secondary">{{ p.type|default('-') }}</span>
+                                        {% endif %}
+                                    </span>
+                                    <select class="form-select form-select-sm edit-input d-none">
+                                        <option value="매입" {{ 'selected' if p.type == '매입' }}>매입</option>
+                                        <option value="매출" {{ 'selected' if p.type == '매출' }}>매출</option>
+                                    </select>
+                                </td>
+                                <td data-field="notes">
+                                    <span class="view-val"><small>{{ p.notes|default('-') }}</small></span>
+                                    <input type="text" class="form-control form-control-sm edit-input d-none"
+                                           value="{{ p.notes|default('') }}">
+                                </td>
+                                <td class="text-nowrap">
+                                    <!-- 보기모드 버튼 -->
+                                    <span class="view-btns">
+                                        <button type="button" class="btn btn-sm btn-outline-warning btn-edit" title="수정">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <form method="POST" action="{{ url_for('trade.delete_partner', partner_id=p.id) }}" class="d-inline"
+                                              onsubmit="return confirm('{{ p.partner_name }} 거래처를 삭제하시겠습니까?')">
+                                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" title="삭제">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </span>
+                                    <!-- 수정모드 버튼 -->
+                                    <span class="edit-btns d-none">
+                                        <button type="button" class="btn btn-sm btn-success btn-save" title="저장">
+                                            <i class="bi bi-check-lg"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-secondary btn-cancel" title="취소">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </span>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="10" class="text-center text-muted py-4">등록된 거래처가 없습니다.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="alert alert-info mt-3">
+    <i class="bi bi-info-circle"></i>
+    거래 내역 조회/삭제/거래명세서 출력은
+    <a href="{{ url_for('outbound.index') }}" class="alert-link">거래처주문처리</a> 페이지에서 가능합니다.
+</div>
+
+<!-- 본사 사업장 관리 -->
+<div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-building-gear"></i> 본사 사업장 관리 ({{ my_businesses|default([])|length }}건)</span>
+        <button class="btn btn-sm btn-primary action-btn" data-bs-toggle="modal" data-bs-target="#addBusinessModal">
+            <i class="bi bi-plus-lg"></i> 사업장 추가
+        </button>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>상호</th>
+                        <th>사업자번호</th>
+                        <th>대표자</th>
+                        <th>연락처</th>
+                        <th>이메일</th>
+                        <th>기본</th>
+                        <th style="width:120px">관리</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in my_businesses|default([]) %}
+                    <tr>
+                        <td><strong>{{ b.business_name }}</strong></td>
+                        <td>{{ b.business_number|default('-') }}</td>
+                        <td>{{ b.representative|default('-') }}</td>
+                        <td>{{ b.contact|default('-') }}</td>
+                        <td>{{ b.email|default('-') }}</td>
+                        <td>
+                            {% if b.is_default %}
+                                <span class="badge bg-success">기본</span>
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if not b.is_default %}
+                            <form method="POST" action="{{ url_for('trade.set_default_business', biz_id=b.id) }}" class="d-inline biz-action-btn">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-success" title="기본 지정">
+                                    <i class="bi bi-check-lg"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                            <form method="POST" action="{{ url_for('trade.delete_business', biz_id=b.id) }}" class="d-inline biz-action-btn"
+                                  onsubmit="return confirm('{{ b.business_name }} 사업장을 삭제하시겠습니까?')">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="삭제">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-4">등록된 사업장이 없습니다.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 사업장 추가 모달 -->
+<div class="modal fade" id="addBusinessModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('trade.add_business') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-building-gear"></i> 사업장 추가</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">상호 <span class="text-danger">*</span></label>
+                        <input type="text" name="business_name" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">사업자번호</label>
+                        <input type="text" name="business_number" class="form-control" placeholder="000-00-00000">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">대표자</label>
+                        <input type="text" name="representative" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">주소</label>
+                        <input type="text" name="address" class="form-control">
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">TEL</label>
+                            <input type="text" name="contact" class="form-control">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">FAX</label>
+                            <input type="text" name="fax" class="form-control">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">이메일</label>
+                        <input type="email" name="email" class="form-control" placeholder="example@company.com">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-primary">추가</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 거래처 추가 모달 -->
+<div class="modal fade" id="addPartnerModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{{ url_for('trade.add_partner') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-building"></i> 거래처 추가</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">거래처명</label>
+                        <input type="text" name="name" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">유형</label>
+                        <select name="type" class="form-select">
+                            <option value="매입">매입</option>
+                            <option value="매출">매출</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">사업자등록번호</label>
+                        <input type="text" name="business_number" class="form-control" placeholder="000-00-00000">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">소재지</label>
+                        <input type="text" name="address" class="form-control">
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">대표자</label>
+                            <input type="text" name="representative" class="form-control">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">담당자</label>
+                            <input type="text" name="contact_person" class="form-control">
+                        </div>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">연락처</label>
+                            <input type="text" name="contact_phone" class="form-control">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label fw-semibold">팩스번호</label>
+                            <input type="text" name="fax" class="form-control">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">이메일</label>
+                        <input type="email" name="email" class="form-control" placeholder="example@company.com">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">비고</label>
+                        <input type="text" name="notes" class="form-control">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-primary">추가</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const isAdmin = {{ 'true' if current_user.role == 'admin' else 'false' }};
+let editMode = isAdmin;
+
+function toggleEditMode() {
+    editMode = !editMode;
+    const btn = document.getElementById('btnEditModeToggle');
+    if(btn){
+        btn.className = editMode ? 'edit-mode-toggle edit-mode' : 'edit-mode-toggle view-mode';
+        btn.innerHTML = editMode ? '✏️ 수정모드' : '🔒 보기모드';
+    }
+    applyEditMode();
+}
+function applyEditMode() {
+    document.querySelectorAll('.view-btns').forEach(el => el.style.display = editMode ? '' : 'none');
+    document.querySelectorAll('.action-btn').forEach(el => el.style.display = editMode ? '' : 'none');
+    document.querySelectorAll('.biz-action-btn').forEach(el => el.style.display = editMode ? '' : 'none');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    applyEditMode();
+    const table = document.getElementById('partnerTable');
+    if (!table) return;
+
+    // ── 수정 버튼 클릭 ──
+    table.addEventListener('click', function(e) {
+        const btn = e.target.closest('.btn-edit');
+        if (!btn) return;
+        const row = btn.closest('tr');
+        enterEditMode(row);
+    });
+
+    // ── 저장 버튼 클릭 ──
+    table.addEventListener('click', function(e) {
+        const btn = e.target.closest('.btn-save');
+        if (!btn) return;
+        const row = btn.closest('tr');
+        saveRow(row);
+    });
+
+    // ── 취소 버튼 클릭 ──
+    table.addEventListener('click', function(e) {
+        const btn = e.target.closest('.btn-cancel');
+        if (!btn) return;
+        const row = btn.closest('tr');
+        cancelEditMode(row);
+    });
+
+    function enterEditMode(row) {
+        row.setAttribute('data-mode', 'edit');
+        row.querySelectorAll('.view-val').forEach(el => el.classList.add('d-none'));
+        row.querySelectorAll('.edit-input').forEach(el => el.classList.remove('d-none'));
+        row.querySelector('.view-btns').classList.add('d-none');
+        row.querySelector('.edit-btns').classList.remove('d-none');
+        // 첫 입력필드에 포커스
+        const firstInput = row.querySelector('.edit-input');
+        if (firstInput) firstInput.focus();
+    }
+
+    function cancelEditMode(row) {
+        row.setAttribute('data-mode', 'view');
+        row.querySelectorAll('.view-val').forEach(el => el.classList.remove('d-none'));
+        row.querySelectorAll('.edit-input').forEach(el => el.classList.add('d-none'));
+        row.querySelector('.view-btns').classList.remove('d-none');
+        row.querySelector('.edit-btns').classList.add('d-none');
+        // 원래 값 복원 (view-val 기준)
+        row.querySelectorAll('td[data-field]').forEach(td => {
+            const field = td.dataset.field;
+            const viewSpan = td.querySelector('.view-val');
+            const input = td.querySelector('.edit-input');
+            if (!input || !viewSpan) return;
+            if (field === 'type') {
+                // select 복원
+                const badge = viewSpan.querySelector('.badge');
+                if (badge) input.value = badge.textContent.trim();
+            } else {
+                // 원래 텍스트에서 '-'는 빈 값
+                let orig = viewSpan.textContent.trim();
+                if (orig === '-') orig = '';
+                input.value = orig;
+            }
+        });
+    }
+
+    function saveRow(row) {
+        const id = row.getAttribute('data-id');
+        const payload = {};
+        row.querySelectorAll('td[data-field]').forEach(td => {
+            const field = td.dataset.field;
+            const input = td.querySelector('.edit-input');
+            if (input) {
+                payload[field] = input.value.trim();
+            }
+        });
+
+        if (!payload.partner_name) {
+            alert('거래처명은 필수입니다.');
+            return;
+        }
+
+        const saveBtn = row.querySelector('.btn-save');
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+        fetch(`/trade/api/partner/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                // view-val 업데이트
+                row.querySelectorAll('td[data-field]').forEach(td => {
+                    const field = td.dataset.field;
+                    const viewSpan = td.querySelector('.view-val');
+                    const input = td.querySelector('.edit-input');
+                    if (!viewSpan || !input) return;
+                    const val = input.value.trim();
+                    if (field === 'type') {
+                        let cls = 'bg-secondary';
+                        if (val === '매입') cls = 'bg-primary';
+                        else if (val === '매출') cls = 'bg-success';
+                        viewSpan.innerHTML = `<span class="badge ${cls}">${val || '-'}</span>`;
+                    } else if (field === 'partner_name') {
+                        viewSpan.innerHTML = `<strong>${val || '-'}</strong>`;
+                    } else if (field === 'address' || field === 'notes') {
+                        viewSpan.innerHTML = `<small>${val || '-'}</small>`;
+                    } else {
+                        viewSpan.textContent = val || '-';
+                    }
+                });
+                // 보기모드로 전환
+                row.setAttribute('data-mode', 'view');
+                row.querySelectorAll('.view-val').forEach(el => el.classList.remove('d-none'));
+                row.querySelectorAll('.edit-input').forEach(el => el.classList.add('d-none'));
+                row.querySelector('.view-btns').classList.remove('d-none');
+                row.querySelector('.edit-btns').classList.add('d-none');
+            } else {
+                alert('수정 실패: ' + (data.error || '알 수 없는 오류'));
+            }
+        })
+        .catch(err => {
+            alert('수정 중 오류: ' + err.message);
+        })
+        .finally(() => {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
+        });
+    }
+});
+</script>
+{% endblock %}

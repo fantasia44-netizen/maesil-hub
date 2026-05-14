@@ -1,0 +1,400 @@
+{% extends "base.html" %}
+{% block title %}기타출고 - 배마마 통합시스템{% endblock %}
+{% block page_title %}기타출고{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+    <!-- 기타출고 입력폼 -->
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-box-arrow-right"></i> 기타출고 등록
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('etc_outbound.process') }}" id="etcOutForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">출고일</label>
+                        <input type="date" name="date" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">창고위치</label>
+                        <select name="location" id="locationSelect" class="form-select" required>
+                            <option value="">선택</option>
+                            {% for loc in locations|default([]) %}
+                            <option value="{{ loc }}">{{ loc }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <hr>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <label class="form-label fw-semibold mb-0">출고 품목</label>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addRow()">
+                            <i class="bi bi-plus-lg"></i> 행 추가
+                        </button>
+                    </div>
+                    <div class="alert alert-info small py-1 px-2 mb-2">
+                        <i class="bi bi-info-circle"></i>
+                        수량: <strong>양수</strong> = 재고 차감 (출고), <strong>음수</strong> (-10 등) = 재고 증량 (입고)
+                    </div>
+
+                    <div id="itemRows">
+                        <!-- 기본 1행 -->
+                        <div class="item-row border rounded p-2 mb-2">
+                            <div class="row g-2">
+                                <div class="col-12">
+                                    <div class="position-relative">
+                                        <input type="text" name="product_name[]" class="form-control form-control-sm product-input"
+                                               placeholder="품목명 (입력하면 자동완성)" required autocomplete="off">
+                                        <div class="autocomplete-list list-group position-absolute w-100" style="z-index:1000; max-height:200px; overflow-y:auto; display:none;"></div>
+                                    </div>
+                                    <small class="text-muted product-stock"></small>
+                                </div>
+                                <div class="col-4">
+                                    <input type="number" name="qty[]" class="form-control form-control-sm"
+                                           placeholder="수량" step="any" required>
+                                </div>
+                                <div class="col-5">
+                                    <select name="reason[]" class="form-select form-select-sm">
+                                        {% for r in reasons %}
+                                        <option value="{{ r }}">{{ r }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-3 text-end">
+                                    <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRow(this)" title="삭제">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                                <div class="col-12">
+                                    <select name="manufacture_date[]" class="form-select form-select-sm mfg-select">
+                                        <option value="">제조일자: 전체 (FIFO 차감)</option>
+                                    </select>
+                                    <small class="text-muted">※ 선택 시 해당 제조일 배치만 차감됩니다</small>
+                                </div>
+                                <div class="col-12">
+                                    <input type="text" name="memo[]" class="form-control form-control-sm"
+                                           placeholder="비고 (선택)">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-warning w-100 mt-2"
+                            onclick="return confirm('기타출고를 실행하시겠습니까?\n양수=재고차감, 음수=재고증량');">
+                        <i class="bi bi-box-arrow-right"></i> 기타출고 실행
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 기타출고 이력 -->
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-clock-history"></i> 기타출고 이력 조회
+            </div>
+            <div class="card-body">
+                <!-- 이력 조회 폼 -->
+                <form method="GET" action="{{ url_for('etc_outbound.index') }}" class="row g-2 align-items-end mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">시작일</label>
+                        <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from|default('') }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">종료일</label>
+                        <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to|default('') }}">
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-sm btn-primary">
+                            <i class="bi bi-search"></i> 조회
+                        </button>
+                        {% if history is defined and history %}
+                        <a href="{{ url_for('etc_outbound.export', date_from=date_from|default(''), date_to=date_to|default('')) }}"
+                           class="btn btn-sm btn-outline-success">
+                            <i class="bi bi-download"></i> 엑셀
+                        </a>
+                        {% endif %}
+                    </div>
+                </form>
+
+                <!-- 이력 테이블 -->
+                <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>날짜</th>
+                                <th>유형</th>
+                                <th>품목명</th>
+                                <th class="text-end">수량</th>
+                                <th>창고</th>
+                                <th>사유/비고</th>
+                                <th class="text-center" style="width:120px">관리</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in history|default([]) %}
+                            <tr>
+                                <td>{{ row.transaction_date|default('-') }}</td>
+                                <td>
+                                    {% if row.type == 'ETC_IN' %}
+                                    <span class="badge bg-success">증량</span>
+                                    {% else %}
+                                    <span class="badge bg-danger">차감</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ row.product_name }}</td>
+                                <td class="text-end {{ 'text-success' if row.qty > 0 else 'text-danger' }}">
+                                    {{ row.qty|fmt_qty }}
+                                </td>
+                                <td>{{ row.location|default('-') }}</td>
+                                <td class="text-muted small">{{ row.memo|default('-') }}</td>
+                                <td class="text-center">
+                                    <button class="btn btn-sm btn-outline-primary py-0 px-2"
+                                            onclick="openEtcEdit({{ row.id }}, '{{ row.product_name|e }}', {{ row.qty|abs }}, '{{ row.memo|default('')|e }}', '{{ row.type }}')"
+                                            title="수정">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger py-0 px-2"
+                                            onclick="cancelEtc({{ row.id }})"
+                                            title="취소">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-4">
+                                    {% if date_from or date_to %}
+                                    해당 기간의 기타출고 이력이 없습니다.
+                                    {% else %}
+                                    날짜를 입력하고 조회하세요.
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+<!-- 기타출고 수정 모달 -->
+<div class="modal fade" id="etcEditModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h6 class="modal-title"><i class="bi bi-pencil"></i> 기타출고 수정</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="etcEditId">
+                <div class="mb-2">
+                    <label class="form-label small fw-bold">품목명</label>
+                    <input type="text" id="etcEditPname" class="form-control form-control-sm" readonly>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small fw-bold">수량 (절대값)</label>
+                    <input type="number" id="etcEditQty" class="form-control form-control-sm" min="0" step="any">
+                    <small class="text-muted">부호는 원본 유형(차감/증량)에 따라 자동 적용</small>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small">비고</label>
+                    <input type="text" id="etcEditMemo" class="form-control form-control-sm">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
+                <button class="btn btn-primary btn-sm" id="etcEditSaveBtn">저장</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function openEtcEdit(id, pname, qty, memo, type) {
+    document.getElementById('etcEditId').value = id;
+    document.getElementById('etcEditPname').value = pname;
+    document.getElementById('etcEditQty').value = qty;
+    document.getElementById('etcEditMemo').value = memo;
+    new bootstrap.Modal(document.getElementById('etcEditModal')).show();
+}
+document.getElementById('etcEditSaveBtn').addEventListener('click', async () => {
+    const id = document.getElementById('etcEditId').value;
+    const qty = parseFloat(document.getElementById('etcEditQty').value);
+    const memo = document.getElementById('etcEditMemo').value.trim();
+    if (!qty || qty <= 0) { alert('수량 입력'); return; }
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const r = await fetch('/etc-outbound/api/update/' + id, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json', 'X-CSRFToken': csrfToken},
+        body: JSON.stringify({qty, memo})
+    });
+    const d = await r.json();
+    if (!d.success) { alert('실패: ' + (d.error || '')); return; }
+    alert('수정 완료');
+    location.reload();
+});
+async function cancelEtc(id) {
+    if (!confirm('이 기타출고를 취소합니다 (재고 원복). 진행?')) return;
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+    const r = await fetch('/etc-outbound/api/cancel/' + id, {
+        method: 'POST',
+        headers: {'X-CSRFToken': csrfToken}
+    });
+    const d = await r.json();
+    if (!d.success) { alert('실패: ' + (d.error || '')); return; }
+    alert('취소 완료');
+    location.reload();
+}
+</script>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 품목 목록 캐시
+let productCache = [];
+
+// 창고 변경 시 품목 목록 로드
+document.getElementById('locationSelect').addEventListener('change', function() {
+    const loc = this.value;
+    productCache = [];
+    if (!loc) return;
+
+    fetch(`{{ url_for('etc_outbound.api_products') }}?location=${encodeURIComponent(loc)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (Array.isArray(data)) productCache = data;
+        })
+        .catch(err => console.error('품목 로드 실패:', err));
+});
+
+// 자동완성 바인딩
+function bindAutocomplete(input) {
+    const listEl = input.nextElementSibling;
+    const stockEl = input.closest('.col-12').querySelector('.product-stock');
+
+    input.addEventListener('input', function() {
+        const q = this.value.trim().toLowerCase();
+        listEl.innerHTML = '';
+        if (!q || productCache.length === 0) { listEl.style.display = 'none'; return; }
+
+        const matches = productCache.filter(p => p.name.toLowerCase().includes(q)).slice(0, 15);
+        if (matches.length === 0) { listEl.style.display = 'none'; return; }
+
+        matches.forEach(p => {
+            const item = document.createElement('a');
+            item.href = '#';
+            item.className = 'list-group-item list-group-item-action py-1 px-2 small';
+            item.innerHTML = `<strong>${p.name}</strong> <span class="text-muted">(재고: ${p.qty} ${p.unit})</span>`;
+            item.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                input.value = p.name;
+                if (stockEl) stockEl.textContent = `현재고: ${p.qty} ${p.unit}`;
+                listEl.style.display = 'none';
+                // 제조일자 select 채우기 (DB 재고 기반 자동세팅)
+                const row = input.closest('.item-row');
+                const mfgSel = row ? row.querySelector('.mfg-select') : null;
+                if (mfgSel) {
+                    const datedBatches = (p.batches || []).filter(b => b.manufacture_date);
+                    mfgSel.innerHTML = '';
+                    if (datedBatches.length === 0) {
+                        mfgSel.innerHTML = '<option value="">FIFO</option>';
+                    } else if (datedBatches.length === 1) {
+                        const b = datedBatches[0];
+                        const opt = document.createElement('option');
+                        opt.value = b.manufacture_date;
+                        opt.textContent = `${b.manufacture_date} — ${b.qty}${p.unit}${b.expiry_date ? ' · 유통' + b.expiry_date : ''}`;
+                        mfgSel.appendChild(opt);
+                    } else {
+                        const opt0 = document.createElement('option');
+                        opt0.value = ''; opt0.textContent = 'FIFO (선택안함)';
+                        mfgSel.appendChild(opt0);
+                        datedBatches.forEach(b => {
+                            const opt = document.createElement('option');
+                            opt.value = b.manufacture_date;
+                            opt.textContent = `${b.manufacture_date} — ${b.qty}${p.unit}${b.expiry_date ? ' · 유통' + b.expiry_date : ''}`;
+                            mfgSel.appendChild(opt);
+                        });
+                    }
+                }
+            });
+            listEl.appendChild(item);
+        });
+        listEl.style.display = 'block';
+    });
+
+    input.addEventListener('blur', function() {
+        setTimeout(() => { listEl.style.display = 'none'; }, 200);
+    });
+
+    input.addEventListener('focus', function() {
+        if (this.value.trim()) this.dispatchEvent(new Event('input'));
+    });
+}
+
+// 초기 바인딩
+document.querySelectorAll('.product-input').forEach(bindAutocomplete);
+
+function addRow() {
+    const container = document.getElementById('itemRows');
+    const reasons = {{ reasons|tojson }};
+    let options = '';
+    reasons.forEach(r => { options += `<option value="${r}">${r}</option>`; });
+
+    const html = `
+    <div class="item-row border rounded p-2 mb-2">
+        <div class="row g-2">
+            <div class="col-12">
+                <div class="position-relative">
+                    <input type="text" name="product_name[]" class="form-control form-control-sm product-input"
+                           placeholder="품목명 (입력하면 자동완성)" required autocomplete="off">
+                    <div class="autocomplete-list list-group position-absolute w-100" style="z-index:1000; max-height:200px; overflow-y:auto; display:none;"></div>
+                </div>
+                <small class="text-muted product-stock"></small>
+            </div>
+            <div class="col-4">
+                <input type="number" name="qty[]" class="form-control form-control-sm"
+                       placeholder="수량" step="any" required>
+            </div>
+            <div class="col-5">
+                <select name="reason[]" class="form-select form-select-sm">
+                    ${options}
+                </select>
+            </div>
+            <div class="col-3 text-end">
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeRow(this)" title="삭제">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+            <div class="col-12">
+                <select name="manufacture_date[]" class="form-select form-select-sm mfg-select">
+                    <option value="">제조일자: 전체 (FIFO 차감)</option>
+                </select>
+                <small class="text-muted">※ 선택 시 해당 제조일 배치만 차감됩니다</small>
+            </div>
+            <div class="col-12">
+                <input type="text" name="memo[]" class="form-control form-control-sm"
+                       placeholder="비고 (선택)">
+            </div>
+        </div>
+    </div>`;
+    container.insertAdjacentHTML('beforeend', html);
+
+    // 새 행 자동완성 바인딩
+    const newInput = container.lastElementChild.querySelector('.product-input');
+    bindAutocomplete(newInput);
+}
+
+function removeRow(btn) {
+    const rows = document.querySelectorAll('.item-row');
+    if (rows.length <= 1) {
+        alert('최소 1개 품목은 필요합니다.');
+        return;
+    }
+    btn.closest('.item-row').remove();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}옵션관리{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">옵션관리 <small class="text-muted fs-6">(삭제/동기화는 마스터관리에서)</small></h4>
+  <button class="btn btn-success btn-sm" onclick="openAddModal()">
+    <i class="bi bi-plus-circle"></i> 옵션추가하기
+  </button>
+</div>
+
+<!-- 검색 -->
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label">검색 (원문명/품목명)</label>
+        <input type="text" id="keyword" class="form-control form-control-sm" placeholder="검색어 입력" onkeydown="if(event.key==='Enter') loadOptions()">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">표시 건수</label>
+        <select id="perPage" class="form-select form-select-sm">
+          <option value="50">50건</option><option value="100">100건</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <button class="btn btn-primary btn-sm" onclick="loadOptions()">🔍 조회</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 테이블 -->
+<div class="table-responsive">
+  <table class="table table-sm table-hover">
+    <thead class="table-light">
+      <tr>
+        <th>ID</th><th>원문명</th><th>품목명</th><th>라인코드</th>
+        <th>출력순서</th><th>바코드</th><th>마지막 매칭</th><th>관리</th>
+      </tr>
+    </thead>
+    <tbody id="optionBody"></tbody>
+  </table>
+</div>
+<div id="pagination" class="d-flex justify-content-center"></div>
+
+<!-- 추가 모달 -->
+<div class="modal fade" id="addOptionModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title"><i class="bi bi-plus-circle"></i> 옵션 추가</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <div class="mb-2"><label class="form-label fw-semibold">원문명 <span class="text-danger">*</span></label><input type="text" id="addOriginal" class="form-control form-control-sm" placeholder="E커머스 주문서 상품명 원문"></div>
+    <div class="mb-2"><label class="form-label fw-semibold">품목명 <span class="text-danger">*</span></label><input type="text" id="addProduct" class="form-control form-control-sm" placeholder="내부 품목명"></div>
+    <div class="row mb-2">
+      <div class="col-4"><label class="form-label">라인코드</label><input type="number" id="addLineCode" class="form-control form-control-sm" value="0"></div>
+      <div class="col-4"><label class="form-label">출력순서</label><input type="number" id="addSortOrder" class="form-control form-control-sm" value="999"></div>
+      <div class="col-4"><label class="form-label">바코드</label><input type="text" id="addBarcode" class="form-control form-control-sm"></div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
+    <button class="btn btn-success btn-sm" onclick="saveNewOption()"><i class="bi bi-check-circle"></i> 등록</button>
+  </div>
+</div></div></div>
+
+<!-- 수정 모달 -->
+<div class="modal fade" id="optionModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title">옵션 수정</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <input type="hidden" id="editId" value="">
+    <div class="mb-2"><label class="form-label">원문명</label><input type="text" id="fOriginal" class="form-control form-control-sm" disabled></div>
+    <div class="mb-2"><label class="form-label">품목명</label><input type="text" id="fProduct" class="form-control form-control-sm"></div>
+    <div class="row mb-2">
+      <div class="col-4"><label class="form-label">라인코드</label><input type="number" id="fLineCode" class="form-control form-control-sm"></div>
+      <div class="col-4"><label class="form-label">출력순서</label><input type="number" id="fSortOrder" class="form-control form-control-sm"></div>
+      <div class="col-4"><label class="form-label">바코드</label><input type="text" id="fBarcode" class="form-control form-control-sm"></div>
+    </div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-primary btn-sm" onclick="saveOption()">저장</button></div>
+</div></div></div>
+
+<script>
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content || '';
+let currentPage = 1;
+
+function loadOptions(page=1) {
+  currentPage = page;
+  const perPage = document.getElementById('perPage').value;
+  const keyword = document.getElementById('keyword').value;
+  const params = new URLSearchParams({page, per_page: perPage, keyword});
+
+  fetch(`/orders/api/options?${params}`, {headers: {'X-CSRFToken': CSRF_TOKEN}})
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) return alert(d.error);
+      const body = document.getElementById('optionBody');
+      body.innerHTML = '';
+      window._optionData = d.data;
+      d.data.forEach((o, idx) => {
+        const matched = o.last_matched_at ? new Date(o.last_matched_at).toLocaleDateString() : '-';
+        body.innerHTML += `<tr>
+          <td class="text-muted">${o.id}</td>
+          <td>${o.original_name||''}</td>
+          <td><strong>${o.product_name||''}</strong></td>
+          <td class="text-center">${o.line_code??''}</td>
+          <td class="text-center">${o.sort_order??999}</td>
+          <td>${o.barcode||''}</td>
+          <td class="text-muted">${matched}</td>
+          <td><button class="btn btn-outline-primary btn-sm py-0" onclick="editOption(window._optionData[${idx}])">수정</button></td>
+        </tr>`;
+      });
+      const pg = document.getElementById('pagination');
+      pg.innerHTML = '';
+      if (page > 1) pg.innerHTML += `<button class="btn btn-sm btn-outline-secondary me-1" onclick="loadOptions(${page-1})">◀ 이전</button>`;
+      pg.innerHTML += `<span class="mx-2">페이지 ${page}</span>`;
+      if (d.data.length >= parseInt(perPage)) pg.innerHTML += `<button class="btn btn-sm btn-outline-secondary ms-1" onclick="loadOptions(${page+1})">다음 ▶</button>`;
+    });
+}
+
+function editOption(o) {
+  document.getElementById('editId').value = o.id;
+  document.getElementById('fOriginal').value = o.original_name || '';
+  document.getElementById('fProduct').value = o.product_name || '';
+  document.getElementById('fLineCode').value = o.line_code ?? '';
+  document.getElementById('fSortOrder').value = o.sort_order ?? 999;
+  document.getElementById('fBarcode').value = o.barcode || '';
+  new bootstrap.Modal(document.getElementById('optionModal')).show();
+}
+
+function saveOption() {
+  const id = document.getElementById('editId').value;
+  const body = {
+    product_name: document.getElementById('fProduct').value.trim(),
+    line_code: parseInt(document.getElementById('fLineCode').value) || 0,
+    sort_order: parseInt(document.getElementById('fSortOrder').value) || 999,
+    barcode: document.getElementById('fBarcode').value.trim(),
+  };
+
+  fetch(`/orders/api/options/${id}`, {method: 'PUT', headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN}, body: JSON.stringify(body)})
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) return alert(d.error);
+      alert(d.message);
+      bootstrap.Modal.getInstance(document.getElementById('optionModal')).hide();
+      loadOptions(currentPage);
+    });
+}
+
+function openAddModal() {
+  document.getElementById('addOriginal').value = '';
+  document.getElementById('addProduct').value = '';
+  document.getElementById('addLineCode').value = '0';
+  document.getElementById('addSortOrder').value = '999';
+  document.getElementById('addBarcode').value = '';
+  new bootstrap.Modal(document.getElementById('addOptionModal')).show();
+  setTimeout(() => document.getElementById('addOriginal').focus(), 300);
+}
+
+function saveNewOption() {
+  const original = document.getElementById('addOriginal').value.trim();
+  const product = document.getElementById('addProduct').value.trim();
+  if (!original || !product) { alert('원문명과 품목명은 필수입니다.'); return; }
+
+  const body = {
+    original_name: original,
+    product_name: product,
+    line_code: document.getElementById('addLineCode').value || '0',
+    sort_order: parseInt(document.getElementById('addSortOrder').value) || 999,
+    barcode: document.getElementById('addBarcode').value.trim(),
+  };
+
+  fetch('/orders/api/option-register', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+    body: JSON.stringify(body),
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (!d.success) { alert('등록 실패: ' + (d.error || '')); return; }
+    alert('등록 완료: ' + original + ' → ' + product);
+    bootstrap.Modal.getInstance(document.getElementById('addOptionModal')).hide();
+    loadOptions(1);
+  })
+  .catch(e => alert('오류: ' + e.message));
+}
+
+document.addEventListener('DOMContentLoaded', () => loadOptions());
+</script>
+{% endblock %}

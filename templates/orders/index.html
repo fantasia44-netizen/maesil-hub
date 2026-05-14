@@ -1,0 +1,831 @@
+{% extends "base.html" %}
+{% block title %}온라인주문처리 - 배마마 통합시스템{% endblock %}
+{% block page_title %}온라인주문처리{% endblock %}
+
+{% block content %}
+<form method="POST" action="{{ url_for('orders.process') }}" enctype="multipart/form-data" id="orderForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <!-- 플랫폼 선택 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <i class="bi bi-shop"></i> 플랫폼 선택
+        </div>
+        <div class="card-body">
+            <div class="d-flex flex-wrap gap-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="platform" id="platform_ss" value="스마트스토어_배마마" checked>
+                    <label class="form-check-label" for="platform_ss">스마트스토어(배마마)</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="platform" id="platform_own" value="자사몰">
+                    <label class="form-check-label" for="platform_own">자사몰</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="platform" id="platform_cp" value="쿠팡">
+                    <label class="form-check-label" for="platform_cp">쿠팡</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="platform" id="platform_ag" value="옥션G마켓">
+                    <label class="form-check-label" for="platform_ag">옥션G마켓</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="platform" id="platform_oa" value="오아시스">
+                    <label class="form-check-label" for="platform_oa">오아시스</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="platform" id="platform_11st" value="11번가">
+                    <label class="form-check-label" for="platform_11st">11번가</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="platform" id="platform_kakao" value="카카오">
+                    <label class="form-check-label" for="platform_kakao">카카오</label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="platform" id="platform_hmc" value="스마트스토어_해미애찬">
+                    <label class="form-check-label" for="platform_hmc">스마트스토어(해미애찬)</label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 파일 입력 -->
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-file-earmark-excel"></i> 파일 업로드</span>
+            <span class="badge bg-info">옵션마스터 DB: {{ option_count|default(0) }}건</span>
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">1. 주문서 <span class="text-danger">*</span></label>
+                    <input type="file" name="order_file" class="form-control" accept=".xlsx,.xls,.csv" required>
+                    <div class="form-text">주문서 파일 (필수)</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">2. 옵션리스트 <span class="text-muted">(선택)</span></label>
+                    <input type="file" name="option_file" class="form-control" accept=".xlsx,.xls,.csv">
+                    <div class="form-text">미입력 시 DB 옵션마스터 사용. 파일 입력 시 DB에 추가 등록.</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">3. 송장결과</label>
+                    <input type="file" name="invoice_file" class="form-control" accept=".xlsx,.xls,.csv">
+                    <div class="form-text">송장 결과 파일 (리얼패킹/외부일괄 시 필수)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 수집일 + 액션 버튼 -->
+    <div class="card mb-4">
+        <div class="card-header">
+            <i class="bi bi-play-circle"></i> 처리 작업
+        </div>
+        <div class="card-body">
+            <div class="row align-items-end mb-3">
+                <div class="col-auto">
+                    <label class="form-label fw-semibold mb-1">주문수집일</label>
+                    <input type="date" name="collection_date" id="collectionDate" class="form-control" style="width:180px;">
+                    <div class="form-text">미입력 시 오늘 날짜</div>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-3">
+                <button type="submit" name="action" value="invoice" class="btn btn-primary btn-lg">
+                    <i class="bi bi-file-earmark-text"></i> 송장생성
+                </button>
+                <button type="submit" name="action" value="realpacking" class="btn btn-success btn-lg">
+                    <i class="bi bi-box-seam"></i> 리얼패킹
+                </button>
+                <button type="submit" name="action" value="external_batch" class="btn btn-warning btn-lg">
+                    <i class="bi bi-boxes"></i> 외부일괄
+                </button>
+            </div>
+        </div>
+    </div>
+</form>
+
+<!-- 결과 영역 -->
+{% if result is defined and result %}
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-check-circle"></i> 처리 결과
+    </div>
+    <div class="card-body">
+        {% if result.logs %}
+        <div class="bg-dark text-light p-3 rounded mb-3" style="max-height: 300px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 0.85rem;">
+            {% for log in result.logs %}
+            <div class="{% if '실패' in log or '오류' in log or '예외' in log or 'ERROR' in log %}text-danger{% elif '경고' in log or 'fallback' in log or 'WARNING' in log %}text-warning{% elif 'OK' in log or '완료' in log or '신규' in log %}text-success{% endif %}">{{ log }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if result.db_result %}
+        <h6><i class="bi bi-database-check"></i> DB 저장 결과</h6>
+        <div class="row text-center mb-3">
+            <div class="col"><span class="fs-5 fw-bold text-success">{{ result.db_result.get('inserted', 0) }}</span><br><small class="text-muted">신규</small></div>
+            <div class="col"><span class="fs-5 fw-bold text-warning">{{ result.db_result.get('updated', 0) }}</span><br><small class="text-muted">변경</small></div>
+            <div class="col"><span class="fs-5 fw-bold text-secondary">{{ result.db_result.get('skipped', 0) }}</span><br><small class="text-muted">스킵</small></div>
+            <div class="col"><span class="fs-5 fw-bold text-danger">{{ result.db_result.get('failed', 0) }}</span><br><small class="text-muted">실패</small></div>
+        </div>
+        {% if result.db_result.get('rpc_error') %}
+        <div class="alert alert-warning py-2" style="font-size:0.85rem;">
+            <i class="bi bi-exclamation-triangle"></i> <strong>RPC fallback:</strong> {{ result.db_result.get('rpc_error', '')[:200] }}
+        </div>
+        {% endif %}
+        {% if result.db_result.get('errors') %}
+        <details>
+            <summary class="text-danger" style="cursor:pointer; font-size:0.85rem;">
+                <i class="bi bi-bug"></i> DB 에러 상세 ({{ result.db_result.get('errors', [])|length }}건)
+            </summary>
+            <div class="mt-1" style="max-height:150px; overflow-y:auto; font-size:0.8rem;">
+                {% for e in result.db_result.get('errors', [])[:10] %}
+                <div class="text-muted">Row {{ e.get('row') }} ({{ e.get('order_no', '') }}): {{ e.get('error', '')[:120] }}</div>
+                {% endfor %}
+                {% if result.db_result.get('errors', [])|length > 10 %}
+                <div class="text-muted">... 외 {{ result.db_result.get('errors', [])|length - 10 }}건</div>
+                {% endif %}
+            </div>
+        </details>
+        {% endif %}
+        {% endif %}
+
+        {% if result.downloads %}
+        <h6><i class="bi bi-download"></i> 다운로드</h6>
+        <div class="list-group">
+            {% for dl in result.downloads %}
+            <a href="{{ dl.url }}" class="list-group-item list-group-item-action">
+                <i class="bi bi-file-earmark-arrow-down"></i> {{ dl.name }}
+            </a>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- AJAX 재처리 결과 영역 (JS에서 동적 삽입) -->
+<div id="reprocessResult"></div>
+
+<!-- 최근 처리 결과 -->
+{% if result_files is defined and result_files %}
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-folder"></i> 최근 처리 결과 ({{ result_files|length }}건)
+    </div>
+    <div class="list-group list-group-flush" style="max-height: 600px; overflow-y: auto;">
+        {% for f in result_files %}
+        <a href="{{ url_for('orders.download', filename=f) }}" class="list-group-item list-group-item-action">
+            <i class="bi bi-file-earmark-arrow-down"></i> {{ f }}
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- 배송파일 이력 (Storage) -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history"></i> <strong>생성파일 이력</strong>
+            <small class="text-muted ms-2">— 송장/집계표 파일 재다운로드</small>
+        </span>
+        <div class="d-flex gap-2 align-items-center">
+            <input type="date" id="fileHistDate" class="form-control form-control-sm" style="width:140px;">
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadFileHistory()">
+                <i class="bi bi-search"></i> 조회
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" onclick="loadFileHistory(7)">
+                <i class="bi bi-calendar3"></i> 7일
+            </button>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0" style="font-size:0.82rem;">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:100px;">날짜</th>
+                    <th>파일명</th>
+                    <th style="width:80px;">크기</th>
+                    <th style="width:80px;">다운로드</th>
+                </tr>
+            </thead>
+            <tbody id="fileHistBody">
+                <tr><td colspan="4" class="text-center text-muted py-3">날짜를 선택 후 조회하세요</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- 검토 대기 모달 (부분매칭 — 자동 반영하지 않고 사용자 승인) -->
+<!-- ================================================================ -->
+<div class="modal fade" id="reviewModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title">
+                    <i class="bi bi-shield-check"></i>
+                    옵션 매칭 검토 대기 (<span id="reviewCount">0</span>건)
+                </h5>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">
+                    아래 항목은 정확 일치가 아닙니다(오매칭 방지를 위해 자동 반영되지 않습니다).
+                    각 항목에 대해 <strong>올바른 품목을 선택</strong>하거나 <strong>새 옵션으로 등록</strong>하세요.
+                </p>
+                <div id="reviewList"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="cancelReviewBtn">
+                    취소
+                </button>
+                <button type="button" class="btn btn-primary" id="reviewReprocessBtn" disabled>
+                    <i class="bi bi-arrow-clockwise"></i> 재처리 실행 (<span id="reviewDone">0</span>/<span id="reviewTotal">0</span>)
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- 미등록 항목 메인 모달 -->
+<!-- ================================================================ -->
+<div class="modal fade" id="unmatchedModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    옵션 미등록 항목 (<span id="unmatchedCount">0</span>건)
+                </h5>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3">아래 상품이 옵션마스터에 등록되어 있지 않습니다.
+                각 항목을 기존 품목에 매핑하거나 신규 등록하세요.</p>
+                <div id="unmatchedList"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" id="cancelReprocess">
+                    취소
+                </button>
+                <button type="button" class="btn btn-primary" id="reprocessBtn" disabled>
+                    <i class="bi bi-arrow-clockwise"></i> 재처리 실행
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- 기존 옵션 검색/매핑 서브모달 -->
+<!-- ================================================================ -->
+<div class="modal fade" id="optionSearchModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-search"></i> 기존 옵션 매핑</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="mappingIdx">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">매핑할 원문명</label>
+                    <input type="text" id="mappingSourceName" class="form-control bg-light" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">기존 옵션 검색</label>
+                    <input type="text" id="optionSearchInput" class="form-control" placeholder="품목명으로 검색...">
+                </div>
+                <div id="optionSearchResults" class="list-group" style="max-height:300px; overflow-y:auto;">
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- 신규 옵션 등록 서브모달 -->
+<!-- ================================================================ -->
+<div class="modal fade" id="newOptionModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-circle"></i> 신규 옵션 등록</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="newIdx">
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">원문명 (E커머스 상품명)</label>
+                    <input type="text" id="newOriginalName" class="form-control bg-light" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">품목명 <span class="text-danger">*</span></label>
+                    <input type="text" id="newProductName" class="form-control" required placeholder="내부 품목명 입력">
+                </div>
+                <div class="row mb-3">
+                    <div class="col-4">
+                        <label class="form-label fw-semibold">라인코드</label>
+                        <input type="text" id="newLineCode" class="form-control" value="0">
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label fw-semibold">출력순서</label>
+                        <input type="number" id="newSortOrder" class="form-control" value="999">
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label fw-semibold">바코드</label>
+                        <input type="text" id="newBarcode" class="form-control" value="">
+                    </div>
+                </div>
+                <button type="button" class="btn btn-primary w-100" id="registerNewOption">
+                    <i class="bi bi-check-circle"></i> 등록
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ── 생성파일 이력 ──
+(function() {
+    var input = document.getElementById('fileHistDate');
+    if (input) {
+        var _n = new Date();
+        input.value = _n.getFullYear() + '-' +
+            String(_n.getMonth()+1).padStart(2,'0') + '-' +
+            String(_n.getDate()).padStart(2,'0');
+    }
+})();
+
+function loadFileHistory(days) {
+    var tbody = document.getElementById('fileHistBody');
+    tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3"><span class="spinner-border spinner-border-sm"></span> 조회 중...</td></tr>';
+
+    var url;
+    if (days) {
+        url = '/orders/api/shipping-file-history?days=' + days;
+    } else {
+        var date = document.getElementById('fileHistDate').value;
+        url = '/orders/api/shipping-file-history?date=' + date;
+    }
+
+    fetch(url, {headers: {'Accept': 'application/json'}})
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var files = data.files || [];
+        if (!files.length) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4"><i class="bi bi-inbox"></i> 해당 기간에 생성된 파일이 없습니다</td></tr>';
+            return;
+        }
+        tbody.innerHTML = files.map(function(f) {
+            var sizeKB = f.size ? Math.round(f.size / 1024) + ' KB' : '-';
+            var badge = '<span class="badge bg-secondary">파일</span>';
+            if (f.name.indexOf('집계표') >= 0) badge = '<span class="badge bg-primary">집계표</span>';
+            else if (f.name.indexOf('송장') >= 0) badge = '<span class="badge bg-success">송장</span>';
+            else if (f.name.indexOf('일괄배송') >= 0) badge = '<span class="badge bg-warning text-dark">일괄배송</span>';
+            else if (f.name.indexOf('리얼패킹') >= 0) badge = '<span class="badge bg-info">리얼패킹</span>';
+            var dispName = f.name.length > 55 ? f.name.substring(0,55)+'...' : f.name;
+            return '<tr>' +
+                '<td>' + f.date + '</td>' +
+                '<td>' + badge + ' <span title="' + f.name + '">' + dispName + '</span></td>' +
+                '<td class="text-muted">' + sizeKB + '</td>' +
+                '<td><a href="/orders/api/shipping-file-download?path=' + encodeURIComponent(f.path) + '" ' +
+                'class="btn btn-outline-primary btn-sm py-0 px-2" target="_blank">' +
+                '<i class="bi bi-download"></i></a></td>' +
+                '</tr>';
+        }).join('');
+    })
+    .catch(function(e) {
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-3">조회 실패: ' + e + '</td></tr>';
+    });
+}
+
+// 페이지 로드 시 오늘 이력 자동 조회
+document.addEventListener('DOMContentLoaded', function() { loadFileHistory(); });
+</script>
+
+<script>
+(function() {
+
+    // 주문수집일 기본값 = 오늘 (로컬 KST 기준 — toISOString은 UTC라 사용 금지)
+    var cdInput = document.getElementById('collectionDate');
+    if (cdInput && !cdInput.value) {
+        var _now = new Date();
+        cdInput.value = _now.getFullYear() + '-' +
+            String(_now.getMonth() + 1).padStart(2, '0') + '-' +
+            String(_now.getDate()).padStart(2, '0');
+    }
+
+    function parseJsonSafe(res) {
+        const ct = (res.headers && res.headers.get('content-type')) ? res.headers.get('content-type') : '';
+        if (ct && ct.indexOf('application/json') !== -1) {
+            return res.json();
+        }
+        return res.text().then(function(t) {
+            const snippet = (t || '').slice(0, 300);
+            throw new Error(`Unexpected non-JSON response (${res.status}). Possibly session expired/CSRF/Server error. Response: ${snippet}`);
+        });
+    }
+
+
+    const csrfToken = '{{ csrf_token() }}';
+    let unmatchedItems = {{ unmatched_items|default([])|tojson }};
+    let needsReview = {{ needs_review|default([])|tojson }};
+    let registeredCount = 0;
+    let reviewResolvedCount = 0;  // needs_review 중 사용자가 확정한 개수
+
+    // ─────────── 검토 대기 (needs_review) 먼저 처리 ───────────
+    if (needsReview.length > 0) {
+        renderReviewList();
+        new bootstrap.Modal(document.getElementById('reviewModal')).show();
+    } else if (unmatchedItems.length > 0) {
+        // 미등록 항목이 있으면 모달 자동 오픈
+        renderUnmatchedList();
+        new bootstrap.Modal(document.getElementById('unmatchedModal')).show();
+    }
+
+    // ─────────── needs_review 렌더 ───────────
+    function renderReviewList() {
+        const container = document.getElementById('reviewList');
+        document.getElementById('reviewCount').textContent = needsReview.length;
+        document.getElementById('reviewTotal').textContent = needsReview.length;
+        document.getElementById('reviewDone').textContent = '0';
+        reviewResolvedCount = 0;
+        container.innerHTML = '';
+
+        needsReview.forEach((item, idx) => {
+            const conf = item.confidence || 0;
+            const confBadge = conf >= 90
+                ? '<span class="badge bg-warning text-dark">' + conf + '% 유사</span>'
+                : '<span class="badge bg-secondary">' + conf + '% 낮은 확신</span>';
+
+            const origDisplay = (item.key || '').replace(/"/g, '&quot;');
+            const origShort = origDisplay.length > 80 ? origDisplay.substring(0, 80) + '...' : origDisplay;
+
+            let candsHtml = '';
+            (item.candidates || []).forEach((c, ci) => {
+                const pn = (c.product_name || '').replace(/"/g, '&quot;');
+                const on = (c.original_name || '').replace(/"/g, '&quot;');
+                candsHtml +=
+                    '<div class="form-check border rounded p-2 mb-1">' +
+                        '<input class="form-check-input review-cand" type="radio" ' +
+                        'name="cand-' + idx + '" id="cand-' + idx + '-' + ci + '" ' +
+                        'data-pn="' + pn + '" data-line="' + (c.line_code || 0) + '" ' +
+                        'data-sort="' + (c.sort_order || 999) + '" data-barcode="' + (c.barcode || '') + '">' +
+                        '<label class="form-check-label small" for="cand-' + idx + '-' + ci + '">' +
+                            '<strong>' + pn + '</strong>' +
+                            '<div class="text-muted" style="font-size:0.75rem;">' + on.substring(0, 100) + '</div>' +
+                        '</label>' +
+                    '</div>';
+            });
+
+            const card = document.createElement('div');
+            card.className = 'card mb-2 review-card';
+            card.id = 'review-' + idx;
+            card.innerHTML =
+                '<div class="card-body py-2 px-3">' +
+                    '<div class="d-flex justify-content-between align-items-start mb-2">' +
+                        '<div style="flex:1; min-width:0;">' +
+                            '<div class="small text-muted">주문 원문</div>' +
+                            '<div class="fw-semibold text-break" title="' + origDisplay + '">' + origShort + '</div>' +
+                        '</div>' +
+                        confBadge +
+                    '</div>' +
+                    '<div class="small text-muted mb-1">추천 후보 (선택):</div>' +
+                    candsHtml +
+                    '<div class="d-flex gap-2 mt-2">' +
+                        '<button class="btn btn-sm btn-primary review-confirm" data-idx="' + idx + '">' +
+                            '<i class="bi bi-check-lg"></i> 선택 확정 + 학습 등록' +
+                        '</button>' +
+                        '<button class="btn btn-sm btn-outline-success review-new" data-idx="' + idx + '">' +
+                            '<i class="bi bi-plus"></i> 전혀 다른 품목 등록' +
+                        '</button>' +
+                    '</div>' +
+                '</div>';
+            container.appendChild(card);
+        });
+
+        container.querySelectorAll('.review-confirm').forEach(b => {
+            b.addEventListener('click', () => confirmReview(parseInt(b.dataset.idx)));
+        });
+        container.querySelectorAll('.review-new').forEach(b => {
+            b.addEventListener('click', () => openNewModalForReview(parseInt(b.dataset.idx)));
+        });
+        updateReviewButton();
+    }
+
+    function updateReviewButton() {
+        const btn = document.getElementById('reviewReprocessBtn');
+        document.getElementById('reviewDone').textContent = reviewResolvedCount;
+        btn.disabled = reviewResolvedCount < needsReview.length;
+    }
+
+    async function confirmReview(idx) {
+        const item = needsReview[idx];
+        const selected = document.querySelector('input[name="cand-' + idx + '"]:checked');
+        if (!selected) { alert('후보 중 하나를 선택하세요.'); return; }
+
+        const payload = {
+            original_name: item.key,
+            product_name: selected.dataset.pn,
+            line_code: selected.dataset.line || '0',
+            sort_order: parseInt(selected.dataset.sort) || 999,
+            barcode: selected.dataset.barcode || '',
+        };
+
+        try {
+            const r = await fetch('/orders/api/option-register', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+                body: JSON.stringify(payload),
+            });
+            const data = await r.json();
+            if (!data.success) { alert('등록 실패: ' + (data.error || '')); return; }
+            // 마킹
+            const card = document.getElementById('review-' + idx);
+            card.classList.add('border-success');
+            card.querySelectorAll('button, input').forEach(el => el.disabled = true);
+            card.insertAdjacentHTML('beforeend',
+                '<div class="alert alert-success py-1 px-2 mb-0 mt-2 small">' +
+                '✅ ' + payload.product_name + ' 로 학습됨</div>');
+            reviewResolvedCount++;
+            updateReviewButton();
+        } catch (e) { alert('오류: ' + e.message); }
+    }
+
+    function openNewModalForReview(idx) {
+        // 재사용 — 기존 newOptionModal 사용. 원문만 프리셋
+        const orig = needsReview[idx].key;
+        document.getElementById('newSourceName').value = orig;
+        document.getElementById('newProductName').value = '';
+        document.getElementById('newLineCode').value = '0';
+        document.getElementById('newSortOrder').value = '999';
+        document.getElementById('newBarcode').value = '';
+        // 제출 후 학습 등록되면 그 카드 마킹
+        window._reviewIdx = idx;
+        new bootstrap.Modal(document.getElementById('newOptionModal')).show();
+    }
+
+    // 재처리 버튼 — 기존 endpoint 재사용
+    document.getElementById('reviewReprocessBtn').addEventListener('click', async function() {
+        this.disabled = true;
+        this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 재처리 중...';
+        try {
+            const r = await fetch('/orders/api/reprocess', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'X-CSRFToken': csrfToken},
+                body: JSON.stringify({}),
+            });
+            const data = await r.json();
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('reviewModal')).hide();
+                location.reload();
+            } else {
+                alert('재처리 실패: ' + (data.error || data.message || ''));
+                this.disabled = false;
+                this.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 재처리 실행';
+            }
+        } catch (e) {
+            alert('오류: ' + e.message);
+            this.disabled = false;
+        }
+    });
+
+    function renderUnmatchedList() {
+        const container = document.getElementById('unmatchedList');
+        document.getElementById('unmatchedCount').textContent = unmatchedItems.length;
+        container.innerHTML = '';
+        registeredCount = 0;
+
+        unmatchedItems.forEach((item, idx) => {
+            const displayName = item.length > 60 ? item.substring(0, 60) + '...' : item;
+            const card = document.createElement('div');
+            card.className = 'card mb-2';
+            card.id = 'unmatched-' + idx;
+            card.innerHTML =
+                '<div class="card-body py-2 px-3 d-flex justify-content-between align-items-center">' +
+                    '<div style="flex:1; min-width:0;">' +
+                        '<strong class="text-truncate d-inline-block" style="max-width:400px;" title="' + item.replace(/"/g, '&quot;') + '">' +
+                            displayName +
+                        '</strong>' +
+                        '<span class="badge bg-danger ms-2 status-badge">미등록</span>' +
+                    '</div>' +
+                    '<div class="btn-group btn-group-sm ms-2 flex-shrink-0">' +
+                        '<button class="btn btn-outline-primary search-btn" data-idx="' + idx + '">' +
+                            '<i class="bi bi-search"></i> 기존 매핑' +
+                        '</button>' +
+                        '<button class="btn btn-outline-success new-btn" data-idx="' + idx + '">' +
+                            '<i class="bi bi-plus"></i> 신규 등록' +
+                        '</button>' +
+                    '</div>' +
+                '</div>';
+            container.appendChild(card);
+        });
+
+        container.querySelectorAll('.search-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() { openSearchModal(parseInt(this.dataset.idx)); });
+        });
+        container.querySelectorAll('.new-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() { openNewModal(parseInt(this.dataset.idx)); });
+        });
+
+        updateReprocessButton();
+    }
+
+    function updateReprocessButton() {
+        const btn = document.getElementById('reprocessBtn');
+        btn.disabled = registeredCount < unmatchedItems.length;
+        if (registeredCount > 0) {
+            btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 재처리 실행 (' + registeredCount + '/' + unmatchedItems.length + ' 등록됨)';
+        }
+    }
+
+    function markAsRegistered(idx, productName) {
+        const card = document.getElementById('unmatched-' + idx);
+        if (!card) return;
+        const badge = card.querySelector('.status-badge');
+        badge.className = 'badge bg-success ms-2 status-badge';
+        badge.textContent = '\u2192 ' + productName;
+        card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+        registeredCount++;
+        updateReprocessButton();
+    }
+
+    // --- 기존 옵션 검색 모달 ---
+    function openSearchModal(idx) {
+        document.getElementById('mappingIdx').value = idx;
+        document.getElementById('mappingSourceName').value = unmatchedItems[idx];
+        document.getElementById('optionSearchInput').value = '';
+        document.getElementById('optionSearchResults').innerHTML = '';
+
+        var modal = new bootstrap.Modal(document.getElementById('optionSearchModal'));
+        modal.show();
+        setTimeout(function() { document.getElementById('optionSearchInput').focus(); }, 300);
+    }
+
+    var searchTimeout;
+    document.getElementById('optionSearchInput').addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        var q = this.value.trim();
+        if (q.length < 2) {
+            document.getElementById('optionSearchResults').innerHTML = '';
+            return;
+        }
+        searchTimeout = setTimeout(function() {
+            fetch('/orders/api/option-search?q=' + encodeURIComponent(q))
+                .then(parseJsonSafe)
+                .then(function(data) {
+                    var idx = parseInt(document.getElementById('mappingIdx').value);
+                    renderSearchResults(data, idx);
+                })
+                .catch(function(e) { console.error(e); });
+        }, 300);
+    });
+
+    function renderSearchResults(results, idx) {
+        var container = document.getElementById('optionSearchResults');
+        container.innerHTML = '';
+        if (!results.length) {
+            container.innerHTML = '<div class="text-muted text-center py-3">검색 결과 없음</div>';
+            return;
+        }
+        results.forEach(function(r) {
+            var item = document.createElement('a');
+            item.href = '#';
+            item.className = 'list-group-item list-group-item-action py-2';
+            item.innerHTML =
+                '<strong>' + r.product_name + '</strong>' +
+                '<small class="text-muted ms-2">라인:' + r.line_code + ' | 순서:' + r.sort_order + ' | 바코드:' + (r.barcode || '-') + '</small>';
+            item.addEventListener('click', function(e) {
+                e.preventDefault();
+                registerMapping(idx, unmatchedItems[idx], r.product_name, r.line_code, r.sort_order, r.barcode || '');
+                bootstrap.Modal.getInstance(document.getElementById('optionSearchModal')).hide();
+            });
+            container.appendChild(item);
+        });
+    }
+
+    // --- 신규 옵션 등록 모달 ---
+    function openNewModal(idx) {
+        document.getElementById('newIdx').value = idx;
+        document.getElementById('newOriginalName').value = unmatchedItems[idx];
+        document.getElementById('newProductName').value = '';
+        document.getElementById('newLineCode').value = '0';
+        document.getElementById('newSortOrder').value = '999';
+        document.getElementById('newBarcode').value = '';
+
+        var modal = new bootstrap.Modal(document.getElementById('newOptionModal'));
+        modal.show();
+        setTimeout(function() { document.getElementById('newProductName').focus(); }, 300);
+    }
+
+    document.getElementById('registerNewOption').addEventListener('click', function() {
+        var idx = parseInt(document.getElementById('newIdx').value);
+        var productName = document.getElementById('newProductName').value.trim();
+        if (!productName) { alert('품목명을 입력하세요.'); return; }
+
+        registerMapping(idx, unmatchedItems[idx], productName,
+            document.getElementById('newLineCode').value,
+            parseInt(document.getElementById('newSortOrder').value),
+            document.getElementById('newBarcode').value);
+
+        bootstrap.Modal.getInstance(document.getElementById('newOptionModal')).hide();
+    });
+
+    // --- API 등록 ---
+    function registerMapping(idx, originalName, productName, lineCode, sortOrder, barcode) {
+        fetch('/orders/api/option-register', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            },
+            body: JSON.stringify({
+                original_name: originalName,
+                product_name: productName,
+                line_code: String(lineCode),
+                sort_order: parseInt(sortOrder) || 999,
+                barcode: barcode || ''
+            })
+        })
+        .then(parseJsonSafe)
+        .then(function(data) {
+            if (data.success) {
+                markAsRegistered(idx, productName);
+            } else {
+                alert('등록 실패: ' + (data.error || ''));
+            }
+        })
+        .catch(function(e) { alert('등록 중 오류: ' + e.message); });
+    }
+
+    // --- 재처리 ---
+    document.getElementById('reprocessBtn').addEventListener('click', function() {
+        var btn = this;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 재처리 중...';
+
+        fetch('/orders/api/reprocess', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken
+            }
+        })
+        .then(parseJsonSafe)
+        .then(function(data) {
+            if (data.success) {
+                bootstrap.Modal.getInstance(document.getElementById('unmatchedModal')).hide();
+                showProcessResult(data);
+            } else if (data.unmatched) {
+                unmatchedItems = data.unmatched;
+                renderUnmatchedList();
+                alert(data.message || '아직 미등록 항목이 있습니다.');
+            } else {
+                alert('처리 실패: ' + (data.error || ''));
+            }
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 재처리 실행';
+        })
+        .catch(function(e) {
+            alert('재처리 중 오류: ' + e.message);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-arrow-clockwise"></i> 재처리 실행';
+        });
+    });
+
+    function showProcessResult(data) {
+        var container = document.getElementById('reprocessResult');
+        var html = '<div class="alert alert-success"><i class="bi bi-check-circle"></i> ' + data.message + '</div>';
+
+        if (data.logs && data.logs.length > 0) {
+            html += '<div class="card mb-3"><div class="card-header"><i class="bi bi-terminal"></i> 처리 로그</div>';
+            html += '<div class="card-body p-0"><div class="bg-dark text-light p-3 rounded" style="max-height:300px; overflow-y:auto; font-family:Consolas,monospace; font-size:0.85rem;">';
+            data.logs.forEach(function(log) { html += '<div>' + log + '</div>'; });
+            html += '</div></div></div>';
+        }
+
+        if (data.downloads && data.downloads.length > 0) {
+            html += '<div class="card"><div class="card-header"><i class="bi bi-download"></i> 다운로드</div>';
+            html += '<div class="list-group list-group-flush">';
+            data.downloads.forEach(function(dl) {
+                html += '<a href="' + dl.url + '" class="list-group-item list-group-item-action">' +
+                        '<i class="bi bi-file-earmark-arrow-down"></i> ' + dl.name + '</a>';
+            });
+            html += '</div></div>';
+        }
+
+        container.innerHTML = html;
+    }
+
+    // 취소 시 서버 임시파일 정리
+    document.getElementById('cancelReprocess').addEventListener('click', function() {
+        fetch('/orders/api/cancel-reprocess', {
+            method: 'POST',
+            headers: {'X-CSRFToken': csrfToken}
+        }).catch(function() {});
+    });
+})();
+</script>
+{% endblock %}

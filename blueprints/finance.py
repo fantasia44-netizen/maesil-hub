@@ -1,0 +1,457 @@
+"""
+finance.py -- 재무 관리 Blueprint.
+비용 등록/수정/삭제, 반복 비용 자동 생성, 카테고리별 합계.
+관리 손익표(P&L): 월별/채널별 손익 분석.
+CEO 재무현황 대시보드, 세무사 전달용 리포트.
+관리자/총괄책임자/CEO 전용.
+"""
+from flask import (
+    Blueprint, render_template, request, current_app,
+    jsonify, send_file,
+)
+from flask_login import login_required, current_user
+
+from auth import role_required, _log_action
+from db_utils import get_db
+
+finance_bp = Blueprint('finance', __name__, url_prefix='/finance')
+
+
+@finance_bp.route('/expenses')
+@role_required('admin', 'general')
+def expenses():
+    """비용 관리 메인 페이지"""
+    return render_template('finance/expenses.html')
+
+
+@finance_bp.route('/api/expenses')
+@role_required('admin', 'general')
+def api_expenses():
+    """비용 목록 JSON API (월별 또는 기간별/카테고리 필터)"""
+    db = get_db()
+    month = request.args.get('month', '')
+    category = request.args.get('category', '')
+    date_from = request.args.get('date_from', '')
+    date_to = request.args.get('date_to', '')
+
+    try:
+        rows = db.query_expenses(
+            month=month or None,
+            category=category or None,
+            date_from=date_from or None,
+            date_to=date_to or None,
+        )
+        categories = db.query_expense_categories()
+
+        # 카테고리별 합계
+        cat_totals = {}
+        grand_total = 0
+        for r in rows:
+            cat = r.get('category', '기타')
+            amt = float(r.get('amount', 0))
+            cat_totals[cat] = cat_totals.get(cat, 0) + amt
+            grand_total += amt
+
+        # 전월 데이터 조회 (증감 비교용) — 월 선택 모드일 때만
+        prev_total = 0
+        prev_cat_totals = {}
+        if month and not date_from and not date_to:
+            parts = month.split('-')
+            year, mon = int(parts[0]), int(parts[1])
+            if mon == 1:
+                prev_month = f"{year - 1}-12"
+            else:
+                prev_month = f"{year}-{mon - 1:02d}"
+            prev_rows = db.query_expenses(month=prev_month)
+            for r in prev_rows:
+                cat = r.get('category', '기타')
+                amt = float(r.get('amount', 0))
+                prev_cat_totals[cat] = prev_cat_totals.get(cat, 0) + amt
+                prev_total += amt
+
+        return jsonify({
+            'success': True,
+            'expenses': rows,
+            'categories': categories,
+            'cat_totals': cat_totals,
+            'grand_total': grand_total,
+            'prev_total': prev_total,
+            'prev_cat_totals': prev_cat_totals,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@finance_bp.route('/api/expenses', methods=['POST'])
+@role_required('admin', 'general')
+def api_create_expense():
+    """비용 1건 등록"""
+    db = get_db()
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '데이터가 없습니다.'}), 400
+
+    expense_date = (data.get('expense_date') or '').strip()
+    category = (data.get('category') or '').strip()
+    amount = data.get('amount', 0)
+
+    if not expense_date or not category:
+        return jsonify({'error': '날짜와 카테고리는 필수입니다.'}), 400
+
+    try:
+        amount = float(amount)
+    except (ValueError, TypeError):
+        return jsonify({'error': '금액이 올바르지 않습니다.'}), 400
+
+    # expense_month 자동 생성 (YYYY-MM)
+    expense_month = expense_date[:7]
+
+    payload = {
+        'expense_date': expense_date,
+        'expense_month': expense_month,
+        'category': category,
+        'subcategory': (data.get('subcategory') or '').strip(),
+        'amount': amount,
+        'is_recurring': bool(data.get('is_recurring', False)),
+        'tax_invoice_id': (data.get('tax_invoice_id') or '').strip() or None,
+        'memo': (data.get('memo') or '').strip(),
+        'registered_by': current_user.username,
+    }
+
+    try:
+        result = db.insert_expense(payload)
+        # new_value에 생성된 ID 포함 (되돌리기용)
+        log_value = dict(payload)
+        if result and result.get('id'):
+            log_value['id'] = result['id']
+        _log_action('create_expense', target=category,
+                     detail=f'날짜={expense_date}, 금액={amount:,.0f}',
+                     new_value=log_value)
+        return jsonify({'success': True, 'expense': result})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@finance_bp.route('/api/expenses/<int:expense_id>', methods=['PUT'])
+@role_required('admin', 'general')
+def api_update_expense(expense_id):
+    """비용 1건 수정"""
+    db = get_db()
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': '데이터가 없습니다.'}), 400
+
+    expense_date = (data.get('expense_date') or '').strip()
+    category = (data.get('category') or '').strip()
+    amount = data.get('amount', 0)
+
+    if not expense_date or not category:
+        return jsonify({'error': '날짜와 카테고리는 필수입니다.'}), 400
+
+    try:
+        amount = float(amount)
+    except (ValueError, TypeError):
+        return jsonify({'error': '금액이 올바르지 않습니다.'}), 400
+
+    expense_month = expense_date[:7]
+
+    payload = {
+        'expense_date': expense_date,
+        'expense_month': expense_month,
+        'category': category,
+        'subcategory': (data.get('subcategory') or '').strip(),
+        'amount': amount,
+        'is_recurring': bool(data.get('is_recurring', False)),
+        'tax_invoice_id': (data.get('tax_invoice_id') or '').strip() or None,
+        'memo': (data.get('memo') or '').strip(),
+    }
+
+    try:
+        # 수정 전 데이터 조회 (되돌리기용)
+        old_rows = db.query_expenses()
+        old_data = next((r for r in old_rows if r.get('id') == expense_id), None)
+
+        result = db.update_expense(expense_id, payload)
+        _log_action('update_expense', target=f'{category} (id={expense_id})',
+                     detail=f'날짜={expense_date}, 금액={amount:,.0f}',
+                     old_value=old_data, new_value=payload)
+        return jsonify({'success': True, 'expense': result})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@finance_bp.route('/api/expenses/<int:expense_id>', methods=['DELETE'])
+@role_required('admin', 'general')
+def api_delete_expense(expense_id):
+    """비용 1건 블라인드 처리 (admin, general)"""
+    db = get_db()
+    try:
+        # 삭제 전 데이터 조회
+        rows = db.query_expenses()
+        old_data = next((r for r in rows if r.get('id') == expense_id), None)
+
+        db.delete_expense(expense_id, deleted_by=current_user.username)
+        _log_action('blind_expense', target=f'id={expense_id}',
+                     old_value=old_data)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@finance_bp.route('/api/expenses/generate-recurring', methods=['POST'])
+@role_required('admin', 'general')
+def api_generate_recurring():
+    """반복 비용 자동 생성"""
+    db = get_db()
+    data = request.get_json() or {}
+    target_month = (data.get('target_month') or '').strip()
+
+    if not target_month:
+        return jsonify({'error': '대상 월을 지정해주세요.'}), 400
+
+    try:
+        count = db.generate_recurring_expenses(target_month)
+        _log_action('generate_recurring_expenses',
+                     detail=f'대상월={target_month}, 생성={count}건')
+        return jsonify({'success': True, 'count': count})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ══════════════════════════════════════════════
+#  관리 손익표 (P&L)
+# ══════════════════════════════════════════════
+
+@finance_bp.route('/pnl')
+@role_required('admin', 'general')
+def pnl():
+    """관리 손익표 메인 페이지"""
+    return render_template('finance/pnl.html')
+
+
+def _get_maesil():
+    """현재 앱에서 Maesil 클라이언트와 operator_id 반환."""
+    maesil_sb = getattr(current_app, 'maesil_sb', None)
+    from services.maesil_bridge import get_maesil_operator_id
+    maesil_op_id = get_maesil_operator_id() if maesil_sb else None
+    return maesil_sb, maesil_op_id
+
+
+@finance_bp.route('/api/pnl')
+@role_required('admin', 'general')
+def api_pnl():
+    """월별 손익표 JSON API.
+    Query params: month=2026-03 (기본: 현재월)
+    """
+    from services.pnl_service import calculate_monthly_pnl
+    from services.tz_utils import today_kst
+
+    db = get_db()
+    month = request.args.get('month', '')
+
+    if not month:
+        today = today_kst()
+        month = today[:7]  # YYYY-MM
+
+    maesil_sb, maesil_op_id = _get_maesil()
+    try:
+        result = calculate_monthly_pnl(db, month,
+                                       maesil_sb=maesil_sb, maesil_op_id=maesil_op_id)
+        return jsonify({'success': True, 'pnl': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@finance_bp.route('/api/pnl/trend')
+@role_required('admin', 'general')
+def api_pnl_trend():
+    """손익 추이 JSON API (최근 N개월).
+    Query params: months=6
+    """
+    from services.pnl_service import calculate_pnl_trend
+
+    db = get_db()
+    months = request.args.get('months', 6, type=int)
+    months = max(2, min(months, 12))  # 2~12 범위
+
+    maesil_sb, maesil_op_id = _get_maesil()
+    try:
+        result = calculate_pnl_trend(db, months=months,
+                                     maesil_sb=maesil_sb, maesil_op_id=maesil_op_id)
+        return jsonify({'success': True, 'trend': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@finance_bp.route('/api/pnl/by-channel')
+@role_required('admin', 'general')
+def api_pnl_by_channel():
+    """채널별 손익 JSON API.
+    Query params: month=2026-03
+    """
+    from services.pnl_service import calculate_channel_pnl
+    from services.tz_utils import today_kst
+
+    db = get_db()
+    month = request.args.get('month', '')
+
+    if not month:
+        today = today_kst()
+        month = today[:7]
+
+    maesil_sb, maesil_op_id = _get_maesil()
+    try:
+        result = calculate_channel_pnl(db, month,
+                                       maesil_sb=maesil_sb, maesil_op_id=maesil_op_id)
+        return jsonify({'success': True, 'channel_pnl': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@finance_bp.route('/api/pnl/settle-debug')
+@role_required('admin')
+def api_pnl_settle_debug():
+    """정산 병합 디버그 — 1~2월 이중집계 진단용.
+
+    Query params: month=2026-01
+    Returns:
+      - maesil_active: Maesil 브릿지 활성 여부
+      - own_rows: maesil-total api_settlements 채널별 gross 합계
+      - maesil_rows: Maesil RPC 채널별 gross 합계
+      - merged_rows: merge 후 채널별 gross 합계
+      - own_count / maesil_count / merged_count: 건수
+      - _settle_prefixes_match: own_rows 중 P&L 포함 prefix 건수
+    """
+    from services.tz_utils import today_kst
+    from services.pnl_service import _month_range, _SETTLE_PREFIXES
+
+    db = get_db()
+    month = request.args.get('month', '')
+    if not month:
+        month = today_kst()[:7]
+
+    date_from, date_to = _month_range(month)
+
+    maesil_sb, maesil_op_id = _get_maesil()
+
+    # 1) maesil-total 자체 정산 (전체 — prefix 무관)
+    own_rows = db.query_api_settlements(date_from=date_from, date_to=date_to) or []
+
+    # 2) Maesil 정산 RPC
+    maesil_rows = []
+    if maesil_sb and maesil_op_id:
+        from services.maesil_bridge import get_maesil_settlements_by_month
+        try:
+            maesil_rows = get_maesil_settlements_by_month(maesil_sb, maesil_op_id, month)
+        except Exception as e:
+            maesil_rows = []
+
+    # 3) 병합
+    merged_rows = own_rows
+    if maesil_rows:
+        from services.maesil_bridge import merge_settlements
+        merged_rows = merge_settlements(list(own_rows), maesil_rows)
+
+    def _agg_by_channel(rows):
+        from collections import defaultdict
+        agg = defaultdict(lambda: {'gross': 0, 'count': 0, 'sids': []})
+        for r in rows:
+            ch = r.get('channel', '기타') or '기타'
+            agg[ch]['gross'] += int(r.get('gross_sales') or 0)
+            agg[ch]['count'] += 1
+            sid = r.get('settlement_id', '')
+            if sid:
+                agg[ch]['sids'].append(sid[:40])
+        return {k: dict(v) for k, v in sorted(agg.items(), key=lambda x: -x[1]['gross'])}
+
+    # P&L prefix 필터 적용 건수
+    pnl_prefixes = tuple(_SETTLE_PREFIXES) if hasattr(_SETTLE_PREFIXES, '__iter__') else ()
+    own_pnl_rows = [r for r in own_rows
+                    if any((r.get('settlement_id') or '').startswith(p) for p in pnl_prefixes)]
+    merged_pnl_rows = [r for r in merged_rows
+                       if any((r.get('settlement_id') or '').startswith(p) for p in pnl_prefixes)]
+
+    return jsonify({
+        'success': True,
+        'month': month,
+        'date_from': date_from,
+        'date_to': date_to,
+        'maesil_active': maesil_sb is not None,
+        'maesil_op_id': maesil_op_id,
+        'own_count': len(own_rows),
+        'maesil_count': len(maesil_rows),
+        'merged_count': len(merged_rows),
+        'own_pnl_count': len(own_pnl_rows),
+        'merged_pnl_count': len(merged_pnl_rows),
+        'own_by_channel': _agg_by_channel(own_rows),
+        'maesil_by_channel': _agg_by_channel(maesil_rows),
+        'merged_by_channel': _agg_by_channel(merged_rows),
+        'own_pnl_gross_total': sum(int(r.get('gross_sales') or 0) for r in own_pnl_rows),
+        'merged_pnl_gross_total': sum(int(r.get('gross_sales') or 0) for r in merged_pnl_rows),
+        'pnl_prefixes': list(pnl_prefixes),
+    })
+
+
+# ══════════════════════════════════════════════
+#  CEO 재무현황 대시보드
+# ══════════════════════════════════════════════
+
+@finance_bp.route('/dashboard')
+@role_required('admin', 'general')
+def dashboard():
+    """CEO 재무현황 대시보드 메인 페이지"""
+    return render_template('finance/dashboard.html')
+
+
+@finance_bp.route('/api/ceo-summary')
+@role_required('admin', 'general')
+def api_ceo_summary():
+    """CEO 재무현황 요약 JSON API.
+    Query params: month=2026-03 (기본: 현재월)
+    """
+    from services.financial_report_service import get_ceo_financial_summary
+    from services.tz_utils import today_kst
+
+    db = get_db()
+    month = request.args.get('month', '')
+
+    if not month:
+        today = today_kst()
+        month = today[:7]
+
+    try:
+        result = get_ceo_financial_summary(db, month)
+        return jsonify({'success': True, 'summary': result})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@finance_bp.route('/api/tax-report/download')
+@role_required('admin', 'general')
+def api_tax_report_download():
+    """세무사 전달용 월간 엑셀 리포트 다운로드.
+    Query params: month=2026-03
+    """
+    from services.financial_report_service import generate_tax_report
+    from services.tz_utils import today_kst
+
+    db = get_db()
+    month = request.args.get('month', '')
+
+    if not month:
+        today = today_kst()
+        month = today[:7]
+
+    try:
+        buf = generate_tax_report(db, month)
+        fname = f"세무리포트_{month}.xlsx"
+        _log_action('download_tax_report',
+                     detail=f'월={month}')
+        return send_file(
+            buf,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=fname,
+        )
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500

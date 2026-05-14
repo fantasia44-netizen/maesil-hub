@@ -47,3 +47,9 @@ class Config:
 
 def get_config():
     return Config
+
+
+# ── 레거시 호환 (db_supabase.py 등 root-level 모듈) ──
+SUPABASE_URL = Config.SUPABASE_URL
+SUPABASE_KEY = Config.SUPABASE_KEY
+SUPABASE_SERVICE_KEY = Config.SUPABASE_SERVICE_KEY

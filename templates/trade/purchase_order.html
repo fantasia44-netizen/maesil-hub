@@ -1,0 +1,723 @@
+{% extends "base.html" %}
+{% block title %}발주서 관리 - 배마마 통합시스템{% endblock %}
+{% block page_title %}발주서 관리{% endblock %}
+
+{% block content %}
+<!-- ─── 발주서 이력 조회 ─── -->
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-search"></i> 발주서 이력 조회
+    </div>
+    <div class="card-body">
+        <!-- 검색 필터 -->
+        <form method="GET" action="{{ url_for('trade.purchase_order') }}" class="row g-2 align-items-end mb-3">
+            <div class="col-md-3">
+                <label class="form-label fw-semibold small">시작일</label>
+                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from|default('') }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold small">종료일</label>
+                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to|default('') }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold small">공급업체 검색/선택</label>
+                <input type="text" id="poFilterSearch" class="form-control form-control-sm mb-1"
+                       placeholder="공급업체명 입력하여 검색..." autocomplete="off">
+                <select name="partner_filter" id="poFilterSelect" class="form-select form-select-sm" size="4">
+                    <option value="전체" {{ 'selected' if not partner_filter or partner_filter == '전체' else '' }}>전체</option>
+                    {% for p in partners|default([]) %}
+                    <option value="{{ p.partner_name }}" {{ 'selected' if partner_filter == p.partner_name else '' }}>
+                        {{ p.partner_name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2 d-flex flex-column gap-1">
+                <button type="submit" class="btn btn-sm btn-primary">
+                    <i class="bi bi-search"></i> 조회
+                </button>
+                <a href="{{ url_for('trade.purchase_order') }}" class="btn btn-sm btn-outline-secondary">
+                    <i class="bi bi-arrow-counterclockwise"></i> 초기화
+                </a>
+            </div>
+        </form>
+
+        <!-- 발주서 이력 테이블 -->
+        <div class="table-responsive" style="max-height:500px; overflow-y:auto;">
+            <table class="table table-sm mb-0" id="poHistoryTable">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width:30px"></th>
+                        <th>발주일</th>
+                        <th>공급업체</th>
+                        <th>발주처</th>
+                        <th class="text-center">품목수</th>
+                        <th>발주담당</th>
+                        <th>등록자</th>
+                        <th style="width:120px">관리</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for po in po_list|default([]) %}
+                    <tr class="po-row" style="cursor:pointer" data-po-id="{{ po.id }}">
+                        <td class="text-center text-muted"><i class="bi bi-chevron-right po-chevron" style="transition:transform .2s"></i></td>
+                        <td>{{ po.order_date|default('-') }}</td>
+                        <td><strong>{{ po.partner_name|default('-') }}</strong></td>
+                        <td>{{ po.my_biz_name|default('-') }}</td>
+                        <td class="text-center">
+                            <span class="badge bg-primary">{{ po.item_count|default(0) }}건</span>
+                        </td>
+                        <td>{{ po.order_manager|default('-') }}</td>
+                        <td><small class="text-muted">{{ po.registered_by|default('-') }}</small></td>
+                        <td>
+                            <a href="{{ url_for('trade.redownload_purchase_order', po_id=po.id) }}"
+                               class="btn btn-sm btn-outline-primary py-0 px-1" title="PDF 다운로드"
+                               onclick="event.stopPropagation()">
+                                <i class="bi bi-file-earmark-pdf"></i>
+                            </a>
+                            <button type="button" class="btn btn-sm btn-outline-warning py-0 px-1 edit-po-btn" title="수정"
+                                    onclick="event.stopPropagation()" data-po-id="{{ po.id }}">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <form method="POST" action="{{ url_for('trade.delete_purchase_order', po_id=po.id) }}" class="d-inline"
+                                  onsubmit="event.stopPropagation(); return confirm('이 발주서 이력을 삭제하시겠습니까?\n{{ po.partner_name }} / {{ po.order_date }}')">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1" title="삭제"
+                                        onclick="event.stopPropagation()">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    <!-- 품목 상세 (숨김) -->
+                    <tr class="po-detail d-none" id="poDetail_{{ po.id }}">
+                        <td></td>
+                        <td colspan="7" class="p-0">
+                            <div class="bg-light border-top px-3 py-2">
+                                <table class="table table-bordered table-sm mb-0" style="font-size:0.8rem">
+                                    <thead>
+                                        <tr class="table-secondary">
+                                            <th style="width:40px">No</th>
+                                            <th>물품명</th>
+                                            <th style="width:60px">단위</th>
+                                            <th style="width:60px" class="text-end">수량</th>
+                                            <th>비고</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% set items = po.items if po.items is iterable and po.items is not string else [] %}
+                                        {% for item in items %}
+                                        <tr>
+                                            <td class="text-center">{{ loop.index }}</td>
+                                            <td>{{ item.product_name|default('-') }}</td>
+                                            <td>{{ item.unit|default('-') }}</td>
+                                            <td class="text-end">{{ item.qty|default('-') }}</td>
+                                            <td><small>{{ item.note|default('') }}</small></td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center text-muted py-4">
+                            {% if date_from or date_to or (partner_filter and partner_filter != '전체') %}
+                            해당 조건의 발주서 이력이 없습니다.
+                            {% else %}
+                            발주서를 생성하면 이력이 자동으로 저장됩니다.
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if po_list|default([])|length > 0 %}
+                <tfoot class="table-light">
+                    <tr>
+                        <td></td>
+                        <td colspan="3" class="text-end fw-bold">합계</td>
+                        <td class="text-center fw-bold text-primary">{{ po_list|map(attribute='item_count')|sum }}건</td>
+                        <td colspan="3"></td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ─── 발주서 작성 ─── -->
+<form id="poForm" method="POST" action="{{ url_for('trade.generate_purchase_order') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="items" id="itemsJson" value="[]">
+
+    <div class="row g-3">
+        <!-- ─── 발주처 (본사) ─── -->
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="bi bi-building-gear"></i> 발주처 (본사)
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">사업장 선택</label>
+                        <select name="my_biz_id" id="myBizSelect" class="form-select form-select-sm">
+                            {% for b in my_businesses|default([]) %}
+                            <option value="{{ b.id }}"
+                                    {{ 'selected' if b.is_default }}
+                                    data-name="{{ b.business_name|default('') }}"
+                                    data-bnum="{{ b.business_number|default('') }}"
+                                    data-rep="{{ b.representative|default('') }}"
+                                    data-addr="{{ b.address|default('') }}"
+                                    data-tel="{{ b.contact|default('') }}"
+                                    data-fax="{{ b.fax|default('') }}"
+                                    data-email="{{ b.email|default('') }}">
+                                {{ b.business_name }}
+                                {% if b.is_default %} (기본){% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div id="bizPreview" class="small text-muted"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ─── 공급업체 (거래처) ─── -->
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="bi bi-building"></i> 공급업체
+                </div>
+                <div class="card-body">
+                    {% if partners|default([])|length > 0 %}
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">거래처 검색/선택</label>
+                        <input type="text" id="partnerSearch" class="form-control form-control-sm mb-1"
+                               placeholder="거래처명 입력하여 검색..." autocomplete="off">
+                        <select name="partner_id" id="partnerSelect" class="form-select form-select-sm" size="4">
+                            <option value="">-- 선택하세요 --</option>
+                            {% for p in partners|default([]) %}
+                            <option value="{{ p.id }}"
+                                    data-name="{{ p.partner_name|default('') }}"
+                                    data-bnum="{{ p.business_number|default('') }}"
+                                    data-rep="{{ p.representative|default('') }}"
+                                    data-contact="{{ p.contact_person|default('') }}"
+                                    data-addr="{{ p.address|default('') }}"
+                                    data-tel="{{ p.phone|default('') }}"
+                                    data-fax="{{ p.fax|default('') }}"
+                                    data-email="{{ p.email|default('') }}">
+                                {{ p.partner_name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div id="partnerPreview" class="small text-muted"></div>
+                    {% else %}
+                    <div class="alert alert-warning mb-0">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        등록된 거래처가 없습니다.
+                        <a href="{{ url_for('trade.index') }}" class="alert-link">거래처를 먼저 등록</a>해주세요.
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── 발주 정보 ─── -->
+    <div class="card mt-3">
+        <div class="card-header">
+            <i class="bi bi-calendar-event"></i> 발주 정보
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">발주일</label>
+                    <input type="date" name="order_date" class="form-control form-control-sm"
+                           value="{{ today|default('') }}" id="orderDate">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">입고요청일</label>
+                    <input type="date" name="request_date" class="form-control form-control-sm"
+                           id="requestDate">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">입고기한</label>
+                    <input type="text" name="delivery_note" class="form-control form-control-sm"
+                           placeholder="예: 발주일 기준 3일 이내">
+                </div>
+            </div>
+            <div class="row g-3 mt-1">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">발주담당자</label>
+                    <input type="text" name="order_manager" class="form-control form-control-sm"
+                           placeholder="발주담당자명">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">계산서담당자</label>
+                    <input type="text" name="invoice_manager" class="form-control form-control-sm"
+                           placeholder="계산서담당자명">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">연락처</label>
+                    <input type="text" name="manager_contact" class="form-control form-control-sm"
+                           placeholder="담당자 연락처">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── 발주내역 ─── -->
+    <div class="card mt-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-list-task"></i> 발주내역</span>
+            <button type="button" class="btn btn-sm btn-primary" id="addItemBtn">
+                <i class="bi bi-plus-lg"></i> 품목 추가
+            </button>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm mb-0" id="itemTable">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width:40px">No</th>
+                            <th>물품명</th>
+                            <th style="width:100px">단위</th>
+                            <th style="width:100px">수량</th>
+                            <th>비고</th>
+                            <th style="width:50px"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="itemBody">
+                    </tbody>
+                </table>
+            </div>
+            <div id="noItemMsg" class="text-center text-muted py-3">
+                <i class="bi bi-inbox"></i> 품목을 추가하세요.
+            </div>
+        </div>
+    </div>
+
+    <!-- ─── 주의사항 ─── -->
+    <div class="card mt-3">
+        <div class="card-header">
+            <i class="bi bi-exclamation-circle"></i> 주의사항
+        </div>
+        <div class="card-body">
+            <textarea name="caution_text" class="form-control form-control-sm" rows="4"
+                      placeholder="주의사항을 입력하세요 (선택사항)"></textarea>
+        </div>
+    </div>
+
+    <!-- ─── 생성 버튼 ─── -->
+    <div class="mt-3 text-end">
+        <button type="submit" class="btn btn-primary" id="generateBtn">
+            <i class="bi bi-file-earmark-pdf"></i> 발주서 PDF 생성
+        </button>
+    </div>
+</form>
+{% endblock %}
+
+<!-- ─── 발주서 수정 모달 ─── -->
+<div class="modal fade" id="editPoModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form id="editPoForm" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="items" id="editPoItemsJson" value="[]">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="bi bi-pencil"></i> 발주서 수정</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">발주일</label>
+                            <input type="date" name="order_date" id="editPoDate" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">입고요청일</label>
+                            <input type="date" name="request_date" id="editPoReqDate" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">입고기한</label>
+                            <input type="text" name="delivery_note" id="editPoDelivery" class="form-control form-control-sm">
+                        </div>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">발주처</label>
+                            <select name="my_biz_id" id="editPoBiz" class="form-select form-select-sm">
+                                {% for b in my_businesses|default([]) %}
+                                <option value="{{ b.id }}">{{ b.business_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">공급업체</label>
+                            <select name="partner_id" id="editPoPartner" class="form-select form-select-sm">
+                                {% for p in partners|default([]) %}
+                                <option value="{{ p.id }}">{{ p.partner_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">발주담당자</label>
+                            <input type="text" name="order_manager" id="editPoManager" class="form-control form-control-sm">
+                        </div>
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">계산서담당자</label>
+                            <input type="text" name="invoice_manager" id="editPoInvMgr" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">연락처</label>
+                            <input type="text" name="manager_contact" id="editPoContact" class="form-control form-control-sm">
+                        </div>
+                    </div>
+                    <!-- 품목 테이블 -->
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <label class="fw-semibold small">발주내역</label>
+                        <button type="button" class="btn btn-sm btn-primary" id="editPoAddItem">
+                            <i class="bi bi-plus-lg"></i> 추가
+                        </button>
+                    </div>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:40px">No</th>
+                                    <th>물품명</th>
+                                    <th style="width:80px">단위</th>
+                                    <th style="width:80px">수량</th>
+                                    <th>비고</th>
+                                    <th style="width:40px"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="editPoItemBody"></tbody>
+                        </table>
+                    </div>
+                    <div class="mt-2">
+                        <label class="form-label small fw-semibold">주의사항</label>
+                        <textarea name="caution_text" id="editPoCaution" class="form-control form-control-sm" rows="2"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer py-1">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-sm btn-primary">
+                        <i class="bi bi-check-lg"></i> 수정 저장
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+
+    // ── 이력 조회: 품목 상세 토글 ──
+    document.querySelectorAll('.po-row').forEach(row => {
+        row.addEventListener('click', function() {
+            const poId = this.dataset.poId;
+            const detail = document.getElementById('poDetail_' + poId);
+            const chevron = this.querySelector('.po-chevron');
+            if (detail) {
+                detail.classList.toggle('d-none');
+                if (chevron) {
+                    chevron.style.transform = detail.classList.contains('d-none') ? '' : 'rotate(90deg)';
+                }
+            }
+        });
+    });
+
+    // ── 이력 조회: 공급업체 검색 필터 ──
+    const poFilterSearch = document.getElementById('poFilterSearch');
+    const poFilterSelect = document.getElementById('poFilterSelect');
+    let allFilterOptions = [];
+    if (poFilterSelect) {
+        poFilterSelect.querySelectorAll('option').forEach(opt => {
+            allFilterOptions.push({ value: opt.value, text: opt.textContent.trim(), selected: opt.selected });
+        });
+    }
+    if (poFilterSearch && poFilterSelect) {
+        poFilterSearch.addEventListener('input', function() {
+            const keyword = this.value.trim().toLowerCase();
+            poFilterSelect.innerHTML = '';
+            allFilterOptions.forEach(o => {
+                if (!keyword || o.text.toLowerCase().includes(keyword) || o.value === '전체') {
+                    const opt = document.createElement('option');
+                    opt.value = o.value;
+                    opt.textContent = o.text;
+                    if (o.selected) opt.selected = true;
+                    poFilterSelect.appendChild(opt);
+                }
+            });
+        });
+    }
+
+    const itemBody  = document.getElementById('itemBody');
+    const addBtn    = document.getElementById('addItemBtn');
+    const noItemMsg = document.getElementById('noItemMsg');
+    const itemsJson = document.getElementById('itemsJson');
+    const form      = document.getElementById('poForm');
+    let itemIndex   = 0;
+
+    // 오늘 날짜 기본값
+    const orderDate = document.getElementById('orderDate');
+    if (orderDate && !orderDate.value) {
+        orderDate.value = new Date().toISOString().slice(0, 10);
+    }
+
+    // ── 발주처 미리보기 ──
+    const myBizSel = document.getElementById('myBizSelect');
+    const bizPreview = document.getElementById('bizPreview');
+    function updateBizPreview() {
+        if (!myBizSel || !bizPreview) return;
+        const opt = myBizSel.selectedOptions[0];
+        if (!opt) { bizPreview.innerHTML = ''; return; }
+        bizPreview.innerHTML = `
+            <div><strong>${opt.dataset.name || ''}</strong></div>
+            <div>사업자번호: ${opt.dataset.bnum || '-'} &nbsp;|&nbsp; 대표자: ${opt.dataset.rep || '-'}</div>
+            <div>주소: ${opt.dataset.addr || '-'}</div>
+            <div>TEL: ${opt.dataset.tel || '-'} / FAX: ${opt.dataset.fax || '-'}</div>
+        `;
+    }
+    if (myBizSel) {
+        myBizSel.addEventListener('change', updateBizPreview);
+        updateBizPreview();
+    }
+
+    // ── 거래처 검색 필터 ──
+    const partnerSearch = document.getElementById('partnerSearch');
+    const partnerSel = document.getElementById('partnerSelect');
+    const partnerPreview = document.getElementById('partnerPreview');
+
+    // 전체 옵션 저장 (검색 필터용)
+    let allPartnerOptions = [];
+    if (partnerSel) {
+        partnerSel.querySelectorAll('option').forEach(opt => {
+            allPartnerOptions.push({
+                value: opt.value,
+                text: opt.textContent.trim(),
+                html: opt.outerHTML
+            });
+        });
+    }
+
+    if (partnerSearch && partnerSel) {
+        partnerSearch.addEventListener('input', function() {
+            const keyword = this.value.trim().toLowerCase();
+            // 현재 선택 옵션 초기화
+            partnerSel.innerHTML = '';
+            allPartnerOptions.forEach(o => {
+                if (!keyword || o.text.toLowerCase().includes(keyword) || o.value === '') {
+                    const opt = document.createElement('option');
+                    opt.value = o.value;
+                    opt.innerHTML = o.text;
+                    // data 속성 복원
+                    const origOpt = new DOMParser().parseFromString(o.html, 'text/html').querySelector('option');
+                    if (origOpt) {
+                        for (const attr of origOpt.attributes) {
+                            if (attr.name.startsWith('data-')) {
+                                opt.setAttribute(attr.name, attr.value);
+                            }
+                        }
+                    }
+                    partnerSel.appendChild(opt);
+                }
+            });
+        });
+    }
+
+    function updatePartnerPreview() {
+        if (!partnerSel || !partnerPreview) return;
+        const opt = partnerSel.selectedOptions[0];
+        if (!opt || !opt.value) { partnerPreview.innerHTML = ''; return; }
+        partnerPreview.innerHTML = `
+            <div><strong>${opt.dataset.name || ''}</strong></div>
+            <div>사업자번호: ${opt.dataset.bnum || '-'} &nbsp;|&nbsp; 대표자: ${opt.dataset.rep || '-'} &nbsp;|&nbsp; 담당자: ${opt.dataset.contact || '-'}</div>
+            <div>주소: ${opt.dataset.addr || '-'}</div>
+            <div>TEL: ${opt.dataset.tel || '-'} / FAX: ${opt.dataset.fax || '-'}</div>
+        `;
+    }
+    if (partnerSel) {
+        partnerSel.addEventListener('change', updatePartnerPreview);
+    }
+
+    // ── 품목 추가 ──
+    addBtn.addEventListener('click', function() {
+        itemIndex++;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td class="text-center item-no">${itemIndex}</td>
+            <td><input type="text" class="form-control form-control-sm item-name" placeholder="물품명" required></td>
+            <td><input type="text" class="form-control form-control-sm item-unit" value="EA" placeholder="단위"></td>
+            <td><input type="number" class="form-control form-control-sm item-qty" min="0.001" step="any" value="1" placeholder="수량"></td>
+            <td><input type="text" class="form-control form-control-sm item-note" placeholder="비고"></td>
+            <td>
+                <button type="button" class="btn btn-sm btn-outline-danger btn-remove-item" title="삭제">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </td>
+        `;
+        itemBody.appendChild(tr);
+        noItemMsg.classList.add('d-none');
+        renumberItems();
+    });
+
+    // ── 품목 삭제 ──
+    itemBody.addEventListener('click', function(e) {
+        const btn = e.target.closest('.btn-remove-item');
+        if (!btn) return;
+        btn.closest('tr').remove();
+        renumberItems();
+        if (itemBody.children.length === 0) {
+            noItemMsg.classList.remove('d-none');
+        }
+    });
+
+    function renumberItems() {
+        itemBody.querySelectorAll('tr').forEach((tr, idx) => {
+            tr.querySelector('.item-no').textContent = idx + 1;
+        });
+    }
+
+    // ── 폼 제출: items JSON 직렬화 ──
+    form.addEventListener('submit', function(e) {
+        const rows = itemBody.querySelectorAll('tr');
+        if (rows.length === 0) {
+            e.preventDefault();
+            alert('발주내역에 품목을 1개 이상 추가하세요.');
+            return;
+        }
+
+        const items = [];
+        rows.forEach(tr => {
+            items.push({
+                product_name: tr.querySelector('.item-name').value.trim(),
+                unit:         tr.querySelector('.item-unit').value.trim(),
+                qty:          tr.querySelector('.item-qty').value.trim(),
+                note:         tr.querySelector('.item-note').value.trim(),
+            });
+        });
+
+        const empty = items.filter(i => !i.product_name);
+        if (empty.length > 0) {
+            e.preventDefault();
+            alert('물품명이 비어있는 항목이 있습니다.');
+            return;
+        }
+
+        itemsJson.value = JSON.stringify(items);
+    });
+
+    // 초기 1행 자동 추가
+    addBtn.click();
+
+    // ── 발주서 수정 모달 ──
+    const editPoModal = document.getElementById('editPoModal');
+    if (editPoModal) {
+        const editModal = new bootstrap.Modal(editPoModal);
+        const editForm = document.getElementById('editPoForm');
+        const editItemBody = document.getElementById('editPoItemBody');
+        const editItemsJson = document.getElementById('editPoItemsJson');
+
+        function addEditPoRow(item) {
+            const idx = editItemBody.children.length + 1;
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="text-center edit-po-no">${idx}</td>
+                <td><input type="text" class="form-control form-control-sm ep-name" value="${item ? (item.product_name || '') : ''}" required></td>
+                <td><input type="text" class="form-control form-control-sm ep-unit" value="${item ? (item.unit || 'EA') : 'EA'}"></td>
+                <td><input type="number" class="form-control form-control-sm ep-qty" step="any" value="${item ? (item.qty || 1) : 1}"></td>
+                <td><input type="text" class="form-control form-control-sm ep-note" value="${item ? (item.note || '') : ''}"></td>
+                <td><button type="button" class="btn btn-sm btn-outline-danger ep-remove"><i class="bi bi-x-lg"></i></button></td>
+            `;
+            editItemBody.appendChild(tr);
+            tr.querySelector('.ep-remove').addEventListener('click', () => {
+                tr.remove();
+                renumberEditItems();
+            });
+        }
+
+        function renumberEditItems() {
+            editItemBody.querySelectorAll('tr').forEach((tr, i) => {
+                tr.querySelector('.edit-po-no').textContent = i + 1;
+            });
+        }
+
+        document.getElementById('editPoAddItem').addEventListener('click', () => addEditPoRow(null));
+
+        // 수정 버튼 클릭
+        document.querySelectorAll('.edit-po-btn').forEach(btn => {
+            btn.addEventListener('click', async function() {
+                const poId = this.dataset.poId;
+                editForm.action = `/trade/purchase-order/update/${poId}`;
+                editItemBody.innerHTML = '';
+
+                try {
+                    const res = await fetch(`/trade/purchase-order/api/${poId}`);
+                    const data = await res.json();
+                    if (!data.success) { alert(data.error || '조회 실패'); return; }
+                    const po = data.po;
+
+                    document.getElementById('editPoDate').value = po.order_date || '';
+                    document.getElementById('editPoReqDate').value = po.request_date || '';
+                    document.getElementById('editPoDelivery').value = po.delivery_note || '';
+                    document.getElementById('editPoManager').value = po.order_manager || '';
+                    document.getElementById('editPoInvMgr').value = po.invoice_manager || '';
+                    document.getElementById('editPoContact').value = po.manager_contact || '';
+                    document.getElementById('editPoCaution').value = po.caution_text || '';
+
+                    // 발주처 선택
+                    const bizSel = document.getElementById('editPoBiz');
+                    if (bizSel && po.my_biz_name) {
+                        for (const opt of bizSel.options) {
+                            if (opt.textContent.trim() === po.my_biz_name) { opt.selected = true; break; }
+                        }
+                    }
+                    // 공급업체 선택
+                    const partnerSel = document.getElementById('editPoPartner');
+                    if (partnerSel && po.partner_id) {
+                        partnerSel.value = po.partner_id;
+                    }
+                    // 품목 로드
+                    const items = Array.isArray(po.items) ? po.items : [];
+                    items.forEach(it => addEditPoRow(it));
+                    if (items.length === 0) addEditPoRow(null);
+
+                    editModal.show();
+                } catch (err) {
+                    alert('발주서 조회 중 오류: ' + err.message);
+                }
+            });
+        });
+
+        // 수정 폼 제출
+        editForm.addEventListener('submit', function(e) {
+            const rows = editItemBody.querySelectorAll('tr');
+            if (rows.length === 0) { e.preventDefault(); alert('품목을 추가하세요.'); return; }
+            const items = [];
+            let valid = true;
+            rows.forEach(tr => {
+                const name = tr.querySelector('.ep-name').value.trim();
+                if (!name) { valid = false; return; }
+                items.push({
+                    product_name: name,
+                    unit: tr.querySelector('.ep-unit').value.trim(),
+                    qty: tr.querySelector('.ep-qty').value.trim(),
+                    note: tr.querySelector('.ep-note').value.trim(),
+                });
+            });
+            if (!valid) { e.preventDefault(); alert('물품명이 비어있는 항목이 있습니다.'); return; }
+            editItemsJson.value = JSON.stringify(items);
+        });
+    }
+});
+</script>
+{% endblock %}

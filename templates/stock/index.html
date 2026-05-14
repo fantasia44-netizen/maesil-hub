@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+{% block title %}재고 현황 - 배마마 통합시스템{% endblock %}
+{% block page_title %}재고 현황{% endblock %}
+
+{% block content %}
+<!-- 검색 필터 -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('stock.index') }}" class="row g-3 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">기준일</label>
+                <input type="date" name="date" class="form-control" value="{{ date_str }}" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">위치</label>
+                <select name="location" class="form-select">
+                    <option value="전체">전체</option>
+                    {% for loc in locations %}
+                    <option value="{{ loc }}" {% if location == loc %}selected{% endif %}>{{ loc }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">카테고리</label>
+                <select name="category" class="form-select">
+                    <option value="전체">전체</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat }}" {% if category == cat %}selected{% endif %}>{{ cat }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-1">
+                <label class="form-label fw-semibold">식품유형</label>
+                <select name="food_type" class="form-select">
+                    <option value="전체">전체</option>
+                    <option value="농산물" {% if food_type_filter == '농산물' %}selected{% endif %}>농산물</option>
+                    <option value="수산물" {% if food_type_filter == '수산물' %}selected{% endif %}>수산물</option>
+                    <option value="축산물" {% if food_type_filter == '축산물' %}selected{% endif %}>축산물</option>
+                </select>
+            </div>
+            <div class="col-md-1">
+                <label class="form-label fw-semibold">보기 옵션</label>
+                <select name="view_mode" class="form-select">
+                    <option value="기본" {% if view_mode|default('기본') == '기본' %}selected{% endif %}>기본</option>
+                    <option value="소비기한분리" {% if view_mode == '소비기한분리' %}selected{% endif %}>소비기한 분리</option>
+                    <option value="제조일분리" {% if view_mode == '제조일분리' %}selected{% endif %}>제조일 분리</option>
+                    <option value="이력번호분리" {% if view_mode == '이력번호분리' %}selected{% endif %}>이력번호 분리</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">품목 검색</label>
+                <input type="text" name="product" class="form-control" placeholder="품목명 입력"
+                       value="{{ product_filter|default('') }}">
+            </div>
+            <div class="col-md-1 d-flex align-items-end gap-1">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-search"></i>
+                </button>
+                {% if rows is defined and rows %}
+                <a href="{{ url_for('stock.excel', date=date_str, location=location, category=category, food_type=food_type_filter|default('전체'), view_mode=view_mode, product=product_filter|default('')) }}"
+                   class="btn btn-outline-success" title="엑셀 다운로드">
+                    <i class="bi bi-file-earmark-excel"></i>
+                </a>
+                <a href="{{ url_for('stock.pdf', date=date_str, location=location, category=category, food_type=food_type_filter|default('전체'), view_mode=view_mode, product=product_filter|default('')) }}"
+                   class="btn btn-outline-danger" title="PDF 다운로드">
+                    <i class="bi bi-file-earmark-pdf"></i>
+                </a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 통계 카드 -->
+{% if date_str %}
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="text-muted small">총 품목 수</div>
+                <h3 class="mb-0 fw-bold text-primary">{{ stats.total_items }}</h3>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <div class="text-muted small">총 수량</div>
+                <h3 class="mb-0 fw-bold text-success">{{ stats.total_qty|fmt_qty }}</h3>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- 재고 테이블 -->
+{% if rows %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-box"></i> 재고 현황 (<span id="filteredCount">{{ rows|length }}</span>건)</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0" id="stockTable">
+                <thead class="table-light">
+                    <tr>
+                        <th style="cursor:pointer" onclick="sortTable(0,'text')">품목명 <i class="bi bi-arrow-down-up text-muted small"></i></th>
+                        <th class="text-center" style="width:60px">SKU</th>
+                        <th>카테고리</th>
+                        <th>식품유형</th>
+                        <th class="text-end" style="cursor:pointer" onclick="sortTable(4,'num')">수량 <i class="bi bi-arrow-down-up text-muted small"></i></th>
+                        <th>단위</th>
+                        <th>위치</th>
+                        <th>보관방법</th>
+                        {% if view_mode == '소비기한분리' %}
+                        <th>소비기한</th>
+                        {% elif view_mode == '제조일분리' %}
+                        <th>제조일</th>
+                        {% elif view_mode == '이력번호분리' %}
+                        <th>이력번호</th>
+                        <th>등급</th>
+                        {% endif %}
+                    </tr>
+                    <tr class="table-secondary" id="filterRow">
+                        <td style="padding:4px"><input type="text" class="form-control form-control-sm" placeholder="검색..." data-col="0" data-type="text"></td>
+                        <td style="padding:4px"></td>
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="2" data-type="select"><option value="">전체</option></select></td>
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="3" data-type="select"><option value="">전체</option></select></td>
+                        <td style="padding:4px"></td>
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="5" data-type="select"><option value="">전체</option></select></td>
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="6" data-type="select"><option value="">전체</option></select></td>
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="7" data-type="select"><option value="">전체</option></select></td>
+                        {% if view_mode == '소비기한분리' %}
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="8" data-type="select"><option value="">전체</option></select></td>
+                        {% elif view_mode == '제조일분리' %}
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="8" data-type="select"><option value="">전체</option></select></td>
+                        {% elif view_mode == '이력번호분리' %}
+                        <td style="padding:4px"><input type="text" class="form-control form-control-sm" placeholder="검색..." data-col="8" data-type="text"></td>
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="9" data-type="select"><option value="">전체</option></select></td>
+                        {% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr{% if row.is_negative %} class="table-danger"{% endif %}>
+                        <td><strong>{{ row.product_name }}</strong></td>
+                        <td class="text-center text-muted small">{{ sku_map.get(row.product_name, '-') }}</td>
+                        <td>{{ row.category|default('-', true) }}</td>
+                        <td>{% if row.food_type %}<span class="badge {% if row.food_type == '농산물' %}bg-success{% elif row.food_type == '수산물' %}bg-primary{% elif row.food_type == '축산물' %}bg-danger{% else %}bg-secondary{% endif %} small">{{ row.food_type }}</span>{% else %}-{% endif %}</td>
+                        <td class="text-end">{{ row.qty|fmt_qty }}</td>
+                        <td>{{ row.unit|default('-', true) }}</td>
+                        <td>{{ row.location|default('-', true) }}</td>
+                        <td>{{ row.storage_method|default('-', true) }}</td>
+                        {% if view_mode == '소비기한분리' %}
+                        <td>{{ row.expiry_date|default('-', true) }}</td>
+                        {% elif view_mode == '제조일분리' %}
+                        <td>{{ row.manufacture_date|default('-', true) }}</td>
+                        {% elif view_mode == '이력번호분리' %}
+                        <td>{{ row.lot_number|default('-', true) }}</td>
+                        <td>{{ row.grade|default('-', true) }}</td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% elif date_str %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> 해당 조건의 재고 데이터가 없습니다.
+</div>
+{% endif %}
+
+<script>
+(function() {
+    const table = document.getElementById('stockTable');
+    if (!table) return;
+
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const totalCount = rows.length;
+    const countEl = document.getElementById('filteredCount');
+    const filterRow = document.getElementById('filterRow');
+    const filters = filterRow.querySelectorAll('input, select');
+
+    /* ── 드롭다운 자동 채우기 ── */
+    filterRow.querySelectorAll('select[data-col]').forEach(sel => {
+        const col = parseInt(sel.dataset.col);
+        const vals = new Set();
+        rows.forEach(tr => {
+            const cell = tr.cells[col];
+            if (cell) {
+                const txt = cell.textContent.trim();
+                if (txt && txt !== '-') vals.add(txt);
+            }
+        });
+        Array.from(vals).sort().forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = v;
+            sel.appendChild(opt);
+        });
+    });
+
+    /* ── 필터 적용 ── */
+    function applyFilters() {
+        let visible = 0;
+        rows.forEach(tr => {
+            let show = true;
+            filters.forEach(f => {
+                const col = f.dataset.col;
+                if (col === undefined || col === null) return;
+                const colIdx = parseInt(col);
+                const cell = tr.cells[colIdx];
+                if (!cell) return;
+                const cellText = cell.textContent.trim();
+                const type = f.dataset.type;
+                const val = f.value.trim();
+                if (!val) return;
+                if (type === 'text') {
+                    if (!cellText.toLowerCase().includes(val.toLowerCase())) show = false;
+                } else {
+                    if (cellText !== val) show = false;
+                }
+            });
+            tr.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        countEl.textContent = visible < totalCount ? visible + '/' + totalCount : totalCount;
+    }
+
+    filters.forEach(f => {
+        f.addEventListener(f.tagName === 'SELECT' ? 'change' : 'input', applyFilters);
+    });
+
+    /* ── 정렬 ── */
+    let sortState = {};
+    window.sortTable = function(colIdx, type) {
+        const dir = sortState[colIdx] === 'asc' ? 'desc' : 'asc';
+        sortState = {};
+        sortState[colIdx] = dir;
+
+        rows.sort((a, b) => {
+            const aText = a.cells[colIdx] ? a.cells[colIdx].textContent.trim() : '';
+            const bText = b.cells[colIdx] ? b.cells[colIdx].textContent.trim() : '';
+            if (type === 'num') {
+                const aNum = parseFloat(aText.replace(/,/g, '')) || 0;
+                const bNum = parseFloat(bText.replace(/,/g, '')) || 0;
+                return dir === 'asc' ? aNum - bNum : bNum - aNum;
+            }
+            return dir === 'asc' ? aText.localeCompare(bText, 'ko') : bText.localeCompare(aText, 'ko');
+        });
+
+        rows.forEach(tr => tbody.appendChild(tr));
+    };
+})();
+</script>
+{% endblock %}

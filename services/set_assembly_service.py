@@ -1,0 +1,346 @@
+"""
+set_assembly_service.py — 세트작업 비즈니스 로직.
+BOM(bom_master) 기반으로 단품 FIFO 차감(SET_OUT) + 세트 산출(SET_IN) 처리.
+"""
+from datetime import datetime
+from collections import defaultdict
+
+try:
+    from excel_io import build_stock_snapshot, snapshot_lookup
+except ImportError:
+    from services.excel_io import build_stock_snapshot, snapshot_lookup
+
+
+def _validate_date(date_str):
+    """날짜 형식 검증."""
+    try:
+        datetime.strptime(date_str, '%Y-%m-%d')
+    except ValueError:
+        raise ValueError(f"날짜 형식이 올바르지 않습니다: {date_str}. YYYY-MM-DD 형식으로 입력하세요.")
+
+
+def _load_stock_snapshot(db, location, product_names=None):
+    """특정 창고의 재고 스냅샷을 FIFO 그룹으로 반환.
+    product_names가 주어지면 해당 품목만 조회 (데이터량 최소화).
+    """
+    try:
+        all_data = db.query_stock_by_location(location, product_names=product_names)
+        return build_stock_snapshot(all_data)
+    except Exception as e:
+        print(f"재고 스냅샷 조회 에러: {e}")
+        return {}
+
+
+def parse_components(comp_str):
+    """구성품 문자열 파싱.
+
+    "당근3단x1,애호3단x1,쌀가루3단x5" → [("당근3단", 1), ("애호3단", 1), ("쌀가루3단", 5)]
+    """
+    result = []
+    if not comp_str or not comp_str.strip():
+        return result
+    for item in comp_str.split(','):
+        item = item.strip()
+        if not item:
+            continue
+        # 마지막 'x숫자' 분리
+        idx = item.rfind('x')
+        if idx > 0:
+            name = item[:idx].strip()
+            try:
+                qty = int(item[idx + 1:].strip())
+            except ValueError:
+                name = item
+                qty = 1
+        else:
+            name = item
+            qty = 1
+        if name:
+            result.append((name, qty))
+    return result
+
+
+def explode_bom(bom_lookup, set_name, channel, multiplier=1, _visited=None):
+    """재귀 BOM 전개 — 세트 안의 세트를 최종 단품까지 펼친다.
+
+    Args:
+        bom_lookup: {(channel, set_name): components_str} 딕셔너리
+        set_name: 전개할 세트명
+        channel: 채널 (모든채널 / 쿠팡전용)
+        multiplier: 상위에서 요구하는 수량 배수
+        _visited: 순환 참조 방지용 세트
+
+    Returns:
+        dict: {단품명: 필요수량} — 재귀 전개된 최종 단품 목록
+    """
+    if _visited is None:
+        _visited = set()
+
+    # 순환 참조 방지
+    key = (channel, set_name)
+    if key in _visited:
+        return {}
+    _visited.add(key)
+
+    comp_str = bom_lookup.get(key, '')
+    if not comp_str:
+        return {}
+
+    components = parse_components(comp_str)
+    result = defaultdict(int)
+
+    for comp_name, comp_qty in components:
+        needed = comp_qty * multiplier
+        sub_key = (channel, comp_name)
+        if sub_key in bom_lookup:
+            # 구성품이 또 다른 세트 → 재귀 전개
+            sub_items = explode_bom(bom_lookup, comp_name, channel,
+                                    multiplier=needed, _visited=_visited.copy())
+            for item_name, item_qty in sub_items.items():
+                result[item_name] += item_qty
+        else:
+            # 최종 단품
+            result[comp_name] += needed
+
+    return dict(result)
+
+
+def process_set_assembly(db, date_str, set_name, channel, location, qty,
+                         sub_materials=None, storage_method_override=None,
+                         food_type=None, created_by=None):
+    """세트작업 처리 메인 함수.
+
+    Args:
+        db: SupabaseDB 인스턴스
+        date_str: 작업일자 (YYYY-MM-DD)
+        set_name: 세트명
+        channel: 판매처/채널 (모든채널 / 쿠팡전용)
+        location: 창고위치
+        qty: 세트 수량
+        sub_materials: 부재료 목록 [{'name': str, 'qty': int}, ...]
+        storage_method_override: 보관방법 수동 지정 (None이면 구성품 기준 자동)
+        food_type: 식품유형 (농산물/수산물/축산물, None이면 미지정)
+
+    Returns:
+        dict: {success, set_out_count, set_in_count, sub_out_count, warnings, shortage}
+    """
+    if sub_materials is None:
+        sub_materials = []
+    _validate_date(date_str)
+
+    # ── 1차 실시간 검증 (Validation Engine) ──
+    try:
+        from core.validation_engine import _validate_date as v_date, _validate_location as v_loc
+        v_date(date_str, '세트작업일자')
+        v_loc(location, '세트작업 위치')
+    except ImportError:
+        pass
+
+    if qty <= 0:
+        return {'success': False, 'warnings': ['수량은 1 이상이어야 합니다.'],
+                'shortage': [], 'set_out_count': 0, 'set_in_count': 0}
+
+    # 1. BOM 데이터 로드
+    try:
+        bom_raw = db.query_master_table('bom_master')
+    except Exception as e:
+        return {'success': False, 'warnings': [f'BOM 데이터 조회 실패: {e}'],
+                'shortage': [], 'set_out_count': 0, 'set_in_count': 0}
+
+    bom_lookup = {}
+    for row in bom_raw:
+        ch = row.get('channel', '')
+        sn = row.get('set_name', '')
+        comp = row.get('components', '')
+        if ch and sn:
+            bom_lookup[(ch, sn)] = comp
+
+    # 2. BOM 전개 (재귀)
+    final_items = explode_bom(bom_lookup, set_name, channel, multiplier=qty)
+
+    if not final_items:
+        return {'success': False,
+                'warnings': [f'세트 "{set_name}" ({channel})의 BOM 데이터를 찾을 수 없습니다.'],
+                'shortage': [], 'set_out_count': 0, 'set_in_count': 0}
+
+    # 3. 재고 스냅샷 로드 (BOM 구성품 + 부재료만 필터링하여 조회량 최소화)
+    needed_names = set(final_items.keys())
+    needed_names.update(sm['name'] for sm in sub_materials)
+    # 공백 제거 정규화 버전도 추가 (DB 저장명이 다를 수 있음)
+    needed_names_normalized = {n.replace(' ', '') for n in needed_names}
+    all_names = needed_names | needed_names_normalized
+    snapshot = _load_stock_snapshot(db, location, product_names=all_names)
+
+    # 4. 부족 체크 (구성품 + 부재료)
+    shortage = []
+    for item_name, needed_qty in sorted(final_items.items()):
+        snap_data = snapshot_lookup(snapshot, item_name)
+        available = snap_data.get('total', 0)
+        if available < needed_qty:
+            shortage.append(
+                f"{item_name}: 필요 {needed_qty}, 현재고 {available} (부족 {needed_qty - available})"
+            )
+
+    # 부재료 부족 체크 (입력된 총 수량 그대로 사용)
+    for sm in sub_materials:
+        sm_name = sm['name']
+        sm_needed = sm['qty']  # 사용자가 입력한 총 수량
+        snap_data = snapshot_lookup(snapshot, sm_name)
+        available = snap_data.get('total', 0)
+        if available < sm_needed:
+            shortage.append(
+                f"[부재료] {sm_name}: 필요 {sm_needed}, 현재고 {available} (부족 {sm_needed - available})"
+            )
+
+    if shortage:
+        return {'success': False,
+                'warnings': ['재고 부족으로 세트작업을 진행할 수 없습니다.'],
+                'shortage': shortage,
+                'set_out_count': 0, 'set_in_count': 0, 'sub_out_count': 0}
+
+    # 5. FIFO 차감 (SET_OUT) + 세트 산출 (SET_IN) payload 생성
+    payload = []
+    set_out_count = 0
+    warnings = []
+
+    for item_name, needed_qty in sorted(final_items.items()):
+        snap_data = snapshot_lookup(snapshot, item_name)
+        groups = snap_data.get('groups', [])
+        remain = needed_qty
+
+        if not groups:
+            # 그룹 정보 없이 전체 차감
+            payload.append({
+                "transaction_date": date_str,
+                "type": "SET_OUT",
+                "product_name": item_name,
+                "qty": -remain,
+                "location": location,
+                "unit": snap_data.get('unit', '개'),
+                "storage_method": snap_data.get('storage_method', ''),
+                "memo": f"세트작업: {set_name} ({channel})",
+            })
+            set_out_count += 1
+        else:
+            for g in groups:
+                if remain <= 0:
+                    break
+                deduct = min(remain, g['qty'])
+                if deduct <= 0:
+                    continue
+                payload.append({
+                    "transaction_date": date_str,
+                    "type": "SET_OUT",
+                    "product_name": item_name,
+                    "qty": -deduct,
+                    "location": location,
+                    "category": g.get('category', ''),
+                    "expiry_date": g.get('expiry_date', ''),
+                    "storage_method": g.get('storage_method', ''),
+                    "unit": g.get('unit', '개'),
+                    "origin": g.get('origin', ''),
+                    "manufacture_date": g.get('manufacture_date', ''),
+                    "memo": f"세트작업: {set_name} ({channel})",
+                })
+                g['qty'] -= deduct
+                remain -= deduct
+                set_out_count += 1
+
+    # 6. 부재료 FIFO 차감 (SET_OUT)
+    sub_out_count = 0
+    for sm in sub_materials:
+        sm_name = sm['name']
+        sm_needed = sm['qty']  # 사용자가 입력한 총 수량
+        snap_data = snapshot_lookup(snapshot, sm_name)
+        groups = snap_data.get('groups', [])
+        remain = sm_needed
+
+        if not groups:
+            payload.append({
+                "transaction_date": date_str,
+                "type": "SET_OUT",
+                "product_name": sm_name,
+                "qty": -remain,
+                "location": location,
+                "unit": snap_data.get('unit', '개'),
+                "storage_method": snap_data.get('storage_method', ''),
+                "memo": f"세트작업 부재료: {set_name} ({channel})",
+            })
+            sub_out_count += 1
+        else:
+            for g in groups:
+                if remain <= 0:
+                    break
+                deduct = min(remain, g['qty'])
+                if deduct <= 0:
+                    continue
+                payload.append({
+                    "transaction_date": date_str,
+                    "type": "SET_OUT",
+                    "product_name": sm_name,
+                    "qty": -deduct,
+                    "location": location,
+                    "category": g.get('category', ''),
+                    "expiry_date": g.get('expiry_date', ''),
+                    "storage_method": g.get('storage_method', ''),
+                    "unit": g.get('unit', '개'),
+                    "origin": g.get('origin', ''),
+                    "manufacture_date": g.get('manufacture_date', ''),
+                    "memo": f"세트작업 부재료: {set_name} ({channel})",
+                })
+                g['qty'] -= deduct
+                remain -= deduct
+                sub_out_count += 1
+
+    # 7. 세트 산출 (SET_IN) — 보관방법: 수동지정 우선, 없으면 구성품 기준 자동
+    if storage_method_override:
+        set_storage = storage_method_override
+    else:
+        #    우선순위: 냉동 > 냉장 > 기타(상온 등)
+        _sm_priority = {'냉동': 0, '냉장': 1}
+        _component_sms = [p.get('storage_method', '') for p in payload
+                          if p.get('type') == 'SET_OUT' and p.get('storage_method')]
+        if _component_sms:
+            set_storage = min(_component_sms, key=lambda s: _sm_priority.get(s, 99))
+        else:
+            set_storage = ''
+
+    sub_memo = ""
+    if sub_materials:
+        sub_memo = f", 부재료 {len(sub_materials)}종"
+    set_in_payload = {
+        "transaction_date": date_str,
+        "type": "SET_IN",
+        "product_name": set_name,
+        "qty": qty,
+        "location": location,
+        "category": "완제품",
+        "unit": "개",
+        "storage_method": set_storage,
+        "memo": f"세트작업 ({channel}), 구성품 {len(final_items)}종{sub_memo}",
+    }
+    if food_type:
+        set_in_payload["food_type"] = food_type
+    payload.append(set_in_payload)
+    set_in_count = 1
+
+    # 8. DB 삽입 — created_by / status 일괄 주입
+    for p in payload:
+        p['created_by'] = created_by
+        p['status'] = 'active'
+    try:
+        db.insert_stock_ledger(payload)
+    except Exception as e:
+        return {'success': False, 'warnings': [f'DB 저장 중 오류: {e}'],
+                'shortage': [], 'set_out_count': 0, 'set_in_count': 0, 'sub_out_count': 0}
+
+    return {
+        'success': True,
+        'set_out_count': set_out_count,
+        'set_in_count': set_in_count,
+        'sub_out_count': sub_out_count,
+        'warnings': warnings,
+        'shortage': [],
+        'component_count': len(final_items),
+        'total_deducted': sum(final_items.values()),
+    }

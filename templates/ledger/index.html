@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+{% block title %}수불장 - 배마마 통합시스템{% endblock %}
+{% block page_title %}수불장{% endblock %}
+
+{% block content %}
+<!-- 검색 필터 -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('ledger.index') }}" class="row g-3 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">시작일</label>
+                <input type="date" name="date_from" class="form-control" value="{{ date_from|default('') }}" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">종료일</label>
+                <input type="date" name="date_to" class="form-control" value="{{ date_to|default('') }}" required>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">위치</label>
+                <select name="location" class="form-select">
+                    <option value="전체">전체</option>
+                    {% for loc in locations|default([]) %}
+                    <option value="{{ loc }}" {% if location|default('전체') == loc %}selected{% endif %}>{{ loc }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">수불부 유형</label>
+                <select name="ledger_type" class="form-select">
+                    <option value="">전체</option>
+                    {% for lt in ledger_types|default([]) %}
+                    <option value="{{ lt }}" {% if ledger_type|default('') == lt %}selected{% endif %}>{{ lt }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">보관방법</label>
+                <select name="storage_method" class="form-select">
+                    <option value="">전체</option>
+                    <option value="냉동" {% if storage_method|default('') == '냉동' %}selected{% endif %}>냉동</option>
+                    <option value="냉장" {% if storage_method|default('') == '냉장' %}selected{% endif %}>냉장</option>
+                    <option value="실온" {% if storage_method|default('') == '실온' %}selected{% endif %}>실온</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">품목명 검색</label>
+                <input type="text" name="product_search" class="form-control" placeholder="품목명 입력..."
+                       value="{{ product_search|default('') }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">보기 옵션</label>
+                <select name="view_mode" class="form-select">
+                    <option value="default" {% if view_mode|default('default') == 'default' %}selected{% endif %}>기본(품목별)</option>
+                    <option value="manufacture" {% if view_mode|default('default') == 'manufacture' %}selected{% endif %}>제조일자별</option>
+                    <option value="expiry" {% if view_mode|default('default') == 'expiry' %}selected{% endif %}>소비기한별</option>
+                    <option value="lot_number" {% if view_mode|default('default') == 'lot_number' %}selected{% endif %}>이력번호별</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary" id="btnLedgerSearch"
+                        onclick="if(this.dataset.loading==='1'){event.preventDefault();return;}this.dataset.loading='1';this.disabled=true;this.innerHTML='<span class=\'spinner-border spinner-border-sm\'></span> 조회중...';this.closest('form').submit();">
+                    <i class="bi bi-search"></i> 조회
+                </button>
+                {% if ledger is defined and ledger %}
+                <a href="{{ url_for('ledger.export', date_from=date_from|default(''), date_to=date_to|default(''), location=location|default('전체'), ledger_type=ledger_type|default(''), view_mode=view_mode|default('default'), storage_method=storage_method|default('')) }}"
+                   class="btn btn-outline-success">
+                    <i class="bi bi-download"></i> 엑셀
+                </a>
+                <div class="btn-group">
+                    <a href="{{ url_for('ledger.pdf', date_from=date_from|default(''), date_to=date_to|default(''), location=location|default('전체'), ledger_type=ledger_type|default(''), view_mode=view_mode|default('default'), storage_method=storage_method|default('')) }}"
+                       class="btn btn-outline-danger">
+                        <i class="bi bi-file-earmark-pdf"></i> PDF
+                    </a>
+                    <a href="{{ url_for('ledger.pdf', date_from=date_from|default(''), date_to=date_to|default(''), location=location|default('전체'), ledger_type=ledger_type|default(''), view_mode=view_mode|default('default'), fit_one_page='1') }}"
+                       class="btn btn-outline-danger" title="가로방향, 한 페이지에 축소 출력">
+                        <i class="bi bi-file-earmark-pdf"></i> 한장출력
+                    </a>
+                    <a href="{{ url_for('ledger.pdf', date_from=date_from|default(''), date_to=date_to|default(''), location=location|default('전체'), ledger_type=ledger_type|default(''), view_mode=view_mode|default('default'), multi_col='2') }}"
+                       class="btn btn-outline-danger" title="가로방향 2단 레이아웃">
+                        <i class="bi bi-layout-split"></i> 2단출력
+                    </a>
+                    <a href="{{ url_for('ledger.pdf', date_from=date_from|default(''), date_to=date_to|default(''), location=location|default('전체'), ledger_type=ledger_type|default(''), view_mode=view_mode|default('default'), multi_col='3') }}"
+                       class="btn btn-outline-danger" title="가로방향 3단 레이아웃">
+                        <i class="bi bi-layout-three-columns"></i> 3단출력
+                    </a>
+                    <a href="{{ url_for('ledger.pdf', date_from=date_from|default(''), date_to=date_to|default(''), location=location|default('전체'), ledger_type=ledger_type|default(''), view_mode=view_mode|default('default'), multi_col='4') }}"
+                       class="btn btn-outline-danger" title="가로방향 4단 레이아웃">
+                        <i class="bi bi-grid"></i> 4단출력
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 수불장 테이블 -->
+{% if ledger is defined and ledger %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-journal-text"></i> 수불장 (<span id="filteredCount">{{ ledger|length }}</span>건)</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0" id="ledgerTable">
+                {% set extra_cols = 2 if view_mode|default('default') == 'lot_number' else (1 if view_mode|default('default') in ['manufacture', 'expiry'] else 0) %}
+                <thead class="table-light">
+                    <tr>
+                        <th style="cursor:pointer" onclick="sortTable(0,'text')">품목명 <i class="bi bi-arrow-down-up text-muted small"></i></th>
+                        <th class="text-center" style="width:60px">SKU</th>
+                        <th>위치</th>
+                        <th>종류</th>
+                        <th>보관</th>
+                        <th>단위</th>
+                        {% if view_mode|default('default') == 'manufacture' %}
+                        <th>제조일자</th>
+                        {% elif view_mode|default('default') == 'expiry' %}
+                        <th>소비기한</th>
+                        {% elif view_mode|default('default') == 'lot_number' %}
+                        <th>이력번호</th>
+                        <th>등급</th>
+                        {% endif %}
+                        <th class="text-end" style="cursor:pointer" onclick="sortTable({{ 6 + extra_cols }},'num')">전일재고 <i class="bi bi-arrow-down-up text-muted small"></i></th>
+                        <th class="text-end">입고</th>
+                        <th class="text-end">생산</th>
+                        <th class="text-end">출고</th>
+                        <th class="text-end">이동</th>
+                        <th class="text-end" style="cursor:pointer" onclick="sortTable({{ 11 + extra_cols }},'num')">종료일재고 <i class="bi bi-arrow-down-up text-muted small"></i></th>
+                    </tr>
+                    <tr class="table-secondary" id="filterRow">
+                        <td style="padding:4px"><input type="text" class="form-control form-control-sm" placeholder="검색..." data-col="0" data-type="text"></td>
+                        <td style="padding:4px"></td>
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="2" data-type="select"><option value="">전체</option></select></td>
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="3" data-type="select"><option value="">전체</option></select></td>
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="4" data-type="select"><option value="">전체</option></select></td>
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="5" data-type="select"><option value="">전체</option></select></td>
+                        {% if view_mode|default('default') == 'manufacture' %}
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="6" data-type="select"><option value="">전체</option></select></td>
+                        {% elif view_mode|default('default') == 'expiry' %}
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="6" data-type="select"><option value="">전체</option></select></td>
+                        {% elif view_mode|default('default') == 'lot_number' %}
+                        <td style="padding:4px"><input type="text" class="form-control form-control-sm" placeholder="검색..." data-col="6" data-type="text"></td>
+                        <td style="padding:4px"><select class="form-select form-select-sm" data-col="7" data-type="select"><option value="">전체</option></select></td>
+                        {% endif %}
+                        <td style="padding:4px"></td>
+                        <td style="padding:4px"></td>
+                        <td style="padding:4px"></td>
+                        <td style="padding:4px"></td>
+                        <td style="padding:4px"></td>
+                        <td style="padding:4px"></td>
+                    </tr>
+                </thead>
+                <tbody id="ledgerBody">
+                    {% for row in ledger %}
+                    <tr>
+                        <td><strong>{{ row.product_name }}</strong></td>
+                        <td class="text-center text-muted small">{{ sku_map.get(row.product_name, '-') }}</td>
+                        <td>{{ row.location|default('') }}</td>
+                        <td>{{ row.category|default('') }}</td>
+                        <td>
+                            {% if row.storage_method == '냉동' %}
+                            <span class="badge bg-primary bg-opacity-75">냉동</span>
+                            {% elif row.storage_method == '냉장' %}
+                            <span class="badge bg-info bg-opacity-75">냉장</span>
+                            {% elif row.storage_method == '실온' %}
+                            <span class="badge bg-secondary bg-opacity-75">실온</span>
+                            {% elif row.storage_method %}
+                            <span class="badge bg-light text-dark">{{ row.storage_method }}</span>
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ row.unit|default('') }}</td>
+                        {% if view_mode|default('default') == 'manufacture' %}
+                        <td>{{ row.manufacture_date|default('-') }}</td>
+                        {% elif view_mode|default('default') == 'expiry' %}
+                        <td>{{ row.expiry_date|default('-') }}</td>
+                        {% elif view_mode|default('default') == 'lot_number' %}
+                        <td>{{ row.lot_number|default('-') }}</td>
+                        <td>{{ row.grade|default('-') }}</td>
+                        {% endif %}
+                        <td class="text-end">{{ (row.opening|default(0))|fmt_qty }}</td>
+                        <td class="text-end text-primary">{{ (row.inbound|default(0))|fmt_qty }}</td>
+                        <td class="text-end text-success">{{ (row.production|default(0))|fmt_qty }}</td>
+                        <td class="text-end text-danger">{{ (row.outbound|default(0))|fmt_qty }}</td>
+                        <td class="text-end text-info">{{ (row.transfer|default(0))|fmt_qty }}</td>
+                        <td class="text-end fw-bold">{{ (row.closing|default(0))|fmt_qty }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% elif date_from is defined and date_from %}
+<div class="alert alert-info">
+    <i class="bi bi-info-circle"></i> 해당 조건의 수불장 데이터가 없습니다.
+</div>
+{% endif %}
+
+<script>
+(function() {
+    const table = document.getElementById('ledgerTable');
+    if (!table) return;
+
+    const tbody = document.getElementById('ledgerBody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const totalCount = rows.length;
+    const countEl = document.getElementById('filteredCount');
+    const filterRow = document.getElementById('filterRow');
+    const filters = filterRow.querySelectorAll('input, select');
+
+    /* ── 드롭다운 자동 채우기 ── */
+    filterRow.querySelectorAll('select[data-col]').forEach(sel => {
+        const col = parseInt(sel.dataset.col);
+        const vals = new Set();
+        rows.forEach(tr => {
+            const cell = tr.cells[col];
+            if (cell) {
+                const txt = cell.textContent.trim();
+                if (txt && txt !== '-') vals.add(txt);
+            }
+        });
+        Array.from(vals).sort().forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = v;
+            sel.appendChild(opt);
+        });
+    });
+
+    /* ── 필터 적용 ── */
+    function applyFilters() {
+        let visible = 0;
+        rows.forEach(tr => {
+            let show = true;
+            filters.forEach(f => {
+                const col = f.dataset.col;
+                if (col === undefined || col === null) return;
+                const colIdx = parseInt(col);
+                const cell = tr.cells[colIdx];
+                if (!cell) return;
+                const cellText = cell.textContent.trim();
+                const type = f.dataset.type;
+                const val = f.value.trim();
+                if (!val) return;
+                if (type === 'text') {
+                    if (!cellText.toLowerCase().includes(val.toLowerCase())) show = false;
+                } else {
+                    if (cellText !== val) show = false;
+                }
+            });
+            tr.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        countEl.textContent = visible < totalCount ? visible + '/' + totalCount : totalCount;
+    }
+
+    filters.forEach(f => {
+        f.addEventListener(f.tagName === 'SELECT' ? 'change' : 'input', applyFilters);
+    });
+
+    /* ── 정렬 ── */
+    let sortState = {};
+    window.sortTable = function(colIdx, type) {
+        const dir = sortState[colIdx] === 'asc' ? 'desc' : 'asc';
+        sortState = {};
+        sortState[colIdx] = dir;
+
+        rows.sort((a, b) => {
+            const aText = a.cells[colIdx] ? a.cells[colIdx].textContent.trim() : '';
+            const bText = b.cells[colIdx] ? b.cells[colIdx].textContent.trim() : '';
+            if (type === 'num') {
+                const aNum = parseFloat(aText.replace(/,/g, '')) || 0;
+                const bNum = parseFloat(bText.replace(/,/g, '')) || 0;
+                return dir === 'asc' ? aNum - bNum : bNum - aNum;
+            }
+            return dir === 'asc' ? aText.localeCompare(bText, 'ko') : bText.localeCompare(aText, 'ko');
+        });
+
+        rows.forEach(tr => tbody.appendChild(tr));
+    };
+})();
+</script>
+{% endblock %}

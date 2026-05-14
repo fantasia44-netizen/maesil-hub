@@ -1,0 +1,712 @@
+{% extends "base.html" %}
+{% block title %}소분 관리 - 배마마 통합시스템{% endblock %}
+{% block page_title %}소분 관리{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+    <!-- 시스템 소분 등록 -->
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-scissors"></i> 소분 등록</span>
+                <span class="badge bg-primary" id="itemCountBadge">0건</span>
+            </div>
+            <div class="card-body">
+                <!-- 기준일 + 위치 -->
+                <div class="row mb-3">
+                    <div class="col-sm-4">
+                        <label class="form-label fw-semibold">기준일</label>
+                        <input type="date" id="repackDate" class="form-control" required>
+                    </div>
+                    <div class="col-sm-4">
+                        <label class="form-label fw-semibold">작업 위치</label>
+                        <select id="repackLocation" class="form-select">
+                            <option value="">선택</option>
+                            {% for loc in locations|default([]) %}
+                            <option value="{{ loc }}">{{ loc }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <hr class="my-2">
+
+                <!-- 산출품 입력 -->
+                <div class="border rounded p-2 mb-2 bg-light">
+                    <h6 class="mb-2"><i class="bi bi-plus-circle text-success"></i> 산출품 (소분 결과)</h6>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-sm-4">
+                            <label class="form-label small mb-1">품목명</label>
+                            <div class="position-relative">
+                                <input type="text" id="outName" class="form-control form-control-sm" placeholder="산출 품목명" autocomplete="off">
+                                <div id="outAcList" class="autocomplete-list list-group position-absolute w-100"
+                                     style="z-index:1000; max-height:200px; overflow-y:auto; display:none;"></div>
+                            </div>
+                        </div>
+                        <div class="col-sm-2">
+                            <label class="form-label small mb-1">산출수량</label>
+                            <input type="number" id="outQty" class="form-control form-control-sm" min="0.001" step="any">
+                        </div>
+                        <div class="col-sm-2">
+                            <label class="form-label small mb-1">종류</label>
+                            <select id="outCategory" class="form-select form-select-sm">
+                                <option value="">선택</option>
+                                <option value="완제품">완제품</option>
+                                <option value="반제품" selected>반제품</option>
+                                <option value="원료">원료</option>
+                                <option value="부자재">부자재</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-2">
+                            <label class="form-label small mb-1">단위</label>
+                            <select id="outUnit" class="form-select form-select-sm">
+                                <option value="개" selected>개</option>
+                                <option value="kg">kg</option>
+                                <option value="EA">EA</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-1">
+                        <div class="col-sm-2">
+                            <label class="form-label small mb-1">보관방법</label>
+                            <select id="outStorage" class="form-select form-select-sm">
+                                <option value="">선택</option>
+                                <option value="냉동">냉동</option>
+                                <option value="냉장">냉장</option>
+                                <option value="실온">실온</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-2">
+                            <label class="form-label small mb-1">식품유형</label>
+                            <select id="outFoodType" class="form-select form-select-sm">
+                                <option value="">선택</option>
+                                <option value="농산물">농산물</option>
+                                <option value="수산물">수산물</option>
+                                <option value="축산물">축산물</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-3">
+                            <label class="form-label small mb-1">제조일</label>
+                            <input type="date" id="outMfg" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-sm-3">
+                            <label class="form-label small mb-1">소비기한</label>
+                            <input type="date" id="outExpiry" class="form-control form-control-sm">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 투입품(원료) 입력 -->
+                <div class="border rounded p-2 mb-2" style="overflow:visible;">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0"><i class="bi bi-layers text-danger"></i> 투입품 (원료/반제품)
+                            <small id="stockStatus" class="text-muted ms-2" style="font-weight:normal;"></small>
+                        </h6>
+                        <button type="button" class="btn btn-outline-info btn-sm" id="addMatBtn">
+                            <i class="bi bi-plus"></i> 투입품 추가
+                        </button>
+                    </div>
+                    <div id="materialRows"></div>
+                    <div id="materialEmpty" class="text-center text-muted small py-2">
+                        <i class="bi bi-info-circle"></i> "투입품 추가" 버튼으로 원료를 추가하세요.
+                    </div>
+                </div>
+
+                <!-- 소분항목 추가 버튼 -->
+                <div class="d-grid mb-3">
+                    <button type="button" class="btn btn-outline-primary" id="addItemBtn">
+                        <i class="bi bi-plus-circle"></i> 소분항목 추가 (대기 목록에 추가)
+                    </button>
+                </div>
+
+                <!-- 대기 목록 -->
+                <div class="table-responsive" style="max-height:320px; overflow-y:auto;">
+                    <table class="table table-sm table-bordered mb-0" id="pendingTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width:30px">#</th>
+                                <th>품목명</th>
+                                <th>유형</th>
+                                <th class="text-end" style="width:80px">수량</th>
+                                <th style="width:60px">단위</th>
+                                <th style="width:50px"></th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <!-- 하단 버튼 -->
+                <div class="d-flex justify-content-between mt-3">
+                    <button type="button" class="btn btn-outline-danger btn-sm" id="clearAllBtn">
+                        <i class="bi bi-trash"></i> 전체 삭제
+                    </button>
+                    <button type="button" class="btn btn-success" id="submitBtn">
+                        <i class="bi bi-check-circle"></i> 일괄 소분 처리
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PDF -->
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-file-earmark-pdf"></i> 소분작업일지</div>
+            <div class="card-body">
+                <form method="GET" action="{{ url_for('repack.pdf') }}">
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold small">작업일자</label>
+                        <input type="date" name="date" class="form-control form-control-sm" required>
+                    </div>
+                    <button type="submit" class="btn btn-outline-danger btn-sm w-100">
+                        <i class="bi bi-file-earmark-pdf"></i> PDF 다운로드
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 소분 이력 조회 -->
+<div class="row g-4 mt-2">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center"><span><i class="bi bi-clock-history"></i> 소분 이력 조회</span></div>
+            <div class="card-body">
+                <div class="row g-2 align-items-end mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">시작일</label>
+                        <input type="date" id="histFrom" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold small">종료일</label>
+                        <input type="date" id="histTo" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-md-3">
+                        <button type="button" class="btn btn-sm btn-primary" id="histSearchBtn">
+                            <i class="bi bi-search"></i> 조회
+                        </button>
+                    </div>
+                </div>
+                <div class="table-responsive" style="max-height:400px; overflow-y:auto;">
+                    <table class="table table-hover table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>날짜</th>
+                                <th>문서번호</th>
+                                <th>품목명</th>
+                                <th>유형</th>
+                                <th class="text-end">수량</th>
+                                <th>위치</th>
+                                {% if current_user.role == 'admin' %}<th style="width:70px">관리</th>{% endif %}
+                            </tr>
+                        </thead>
+                        <tbody id="histBody">
+                            <tr><td colspan="7" class="text-center text-muted py-4">날짜를 입력하고 조회하세요.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if current_user.role == 'admin' %}
+<!-- 수정 모달 -->
+<div class="modal fade" id="editModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-pencil-square"></i> 소분 이력 수정</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editId">
+                <div class="row g-2">
+                    <div class="col-8 mb-2">
+                        <label class="form-label small mb-1">품목명</label>
+                        <input type="text" id="editProductName" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-4 mb-2">
+                        <label class="form-label small mb-1">수량</label>
+                        <input type="number" id="editQty" class="form-control form-control-sm" step="any">
+                    </div>
+                    <div class="col-4 mb-2">
+                        <label class="form-label small mb-1">위치</label>
+                        <input type="text" id="editLocation" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-4 mb-2">
+                        <label class="form-label small mb-1">종류</label>
+                        <input type="text" id="editCategory" class="form-control form-control-sm">
+                    </div>
+                    <div class="col-4 mb-2">
+                        <label class="form-label small mb-1">단위</label>
+                        <input type="text" id="editUnit" class="form-control form-control-sm">
+                    </div>
+                </div>
+                <div class="form-text text-muted small mt-1">
+                    <i class="bi bi-info-circle"></i> 유형(산출/투입)은 변경할 수 없습니다.
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary btn-sm" id="editSaveBtn">
+                    <i class="bi bi-check-lg"></i> 저장
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function(){
+    const csrf = '{{ csrf_token() }}';
+    const isAdmin = {{ 'true' if current_user.role == 'admin' else 'false' }};
+    let editMode = isAdmin;
+
+    function escapeHtml(s){
+        if(!s) return '';
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ── 오늘 날짜 기본값 ──
+    const today = new Date().toISOString().slice(0,10);
+    document.getElementById('repackDate').value = today;
+
+    // ── 데이터 ──
+    let allProducts = [];
+    let stockProducts = [];
+    let currentMaterials = [];
+    let pendingItems = [];
+    let matIdCounter = 0;
+
+    // ── 품목 로드 ──
+    function loadProducts(){
+        fetch('/repack/api/products')
+            .then(r=>r.json())
+            .then(data=>{
+                if(Array.isArray(data)) allProducts = data;
+            }).catch(()=>{});
+    }
+    loadProducts();
+
+    // ── 산출품 자동완성 ──
+    const outNameInput = document.getElementById('outName');
+    const outAcList = document.getElementById('outAcList');
+    outNameInput.addEventListener('input', function(){
+        const q = this.value.trim().toLowerCase();
+        outAcList.innerHTML = '';
+        if(!q || !allProducts.length){ outAcList.style.display = 'none'; return; }
+        const matches = allProducts.filter(p => p.name.toLowerCase().includes(q)).slice(0, 12);
+        if(!matches.length){ outAcList.style.display = 'none'; return; }
+        matches.forEach(p => {
+            const a = document.createElement('a');
+            a.href = '#'; a.className = 'list-group-item list-group-item-action py-1 px-2 small';
+            a.textContent = p.name;
+            a.addEventListener('mousedown', e => {
+                e.preventDefault(); outNameInput.value = p.name;
+                outAcList.style.display = 'none'; document.getElementById('outQty').focus();
+            });
+            outAcList.appendChild(a);
+        });
+        outAcList.style.display = 'block';
+    });
+    outNameInput.addEventListener('blur', () => setTimeout(() => outAcList.style.display = 'none', 200));
+
+    function loadStockProducts(loc){
+        if(!loc){ stockProducts=[]; return; }
+        fetch('/repack/api/stock?location='+encodeURIComponent(loc))
+            .then(r=>r.json())
+            .then(data=>{
+                if(Array.isArray(data)) stockProducts = data;
+                else stockProducts = [];
+                if(stockStatusEl){
+                    stockStatusEl.innerHTML = stockProducts.length
+                        ? `<span class="text-success">✔ ${loc} 재고 ${stockProducts.length}건</span>`
+                        : `<span class="text-warning">⚠ ${loc} 재고 0건</span>`;
+                }
+            }).catch(()=>{ stockProducts=[]; });
+    }
+
+
+    // ── 위치 변경 ──
+    const stockStatusEl = document.getElementById('stockStatus');
+    document.getElementById('repackLocation').addEventListener('change', function(){
+        if(!this.value){
+            stockStatusEl.innerHTML = '<span class="text-warning">⚠ 위치를 선택하세요</span>';
+        } else {
+            stockStatusEl.innerHTML = '<span class="text-info">로딩...</span>';
+        }
+        loadStockProducts(this.value);
+    });
+
+    // ── 투입품(재료) 행 ──
+    const materialEmpty = document.getElementById('materialEmpty');
+    document.getElementById('addMatBtn').addEventListener('click', function(){
+        addMaterialRow();
+        if(materialEmpty) materialEmpty.style.display = 'none';
+    });
+
+    function addMaterialRow(){
+        const id = matIdCounter++;
+        const row = document.createElement('div');
+        row.className = 'row g-2 mb-1 mat-row';
+        row.dataset.matId = id;
+        row.style.cssText = 'position:relative; overflow:visible;';
+        row.innerHTML = `
+            <div class="col-md-5" style="overflow:visible;">
+                <div style="position:relative; overflow:visible;">
+                    <input type="text" class="form-control form-control-sm mat-name" placeholder="투입품명 검색" autocomplete="off">
+                    <div class="mat-ac-list list-group"
+                         style="position:absolute; z-index:9999; top:100%; left:0; max-height:200px; overflow-y:auto; display:none; width:320px; background:#fff; border:1px solid #ccc; box-shadow:0 4px 8px rgba(0,0,0,.15);"></div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="input-group input-group-sm">
+                    <input type="number" class="form-control form-control-sm mat-qty" placeholder="수량" min="0.001" step="any">
+                    <span class="input-group-text mat-unit" style="min-width:32px; font-size:0.78rem; font-weight:bold; color:#0d6efd;"></span>
+                </div>
+            </div>
+            <div class="col-md-2">
+                <span class="form-text small mat-stock-info"></span>
+            </div>
+            <div class="col-md-2 d-flex align-items-center">
+                <button type="button" class="btn btn-outline-danger btn-sm remove-mat-btn" data-mat-id="${id}">
+                    <i class="bi bi-x-lg"></i>
+                </button>
+            </div>`;
+        document.getElementById('materialRows').appendChild(row);
+
+        // 커스텀 자동완성 (재고 기반)
+        const nameInput = row.querySelector('.mat-name');
+        const acList = row.querySelector('.mat-ac-list');
+        const stockInfo = row.querySelector('.mat-stock-info');
+        const unitEl = row.querySelector('.mat-unit');
+
+        nameInput.addEventListener('input', function(){
+            const q = this.value.trim().toLowerCase();
+            acList.innerHTML = '';
+            if(!q){ acList.style.display = 'none'; return; }
+            // 위치 선택 시 재고 품목, 미선택 시 전체 품목
+            const useStock = stockProducts.length > 0;
+            const source = useStock ? stockProducts : allProducts;
+            if(!source.length){ acList.style.display = 'none'; return; }
+            const matches = source.filter(p => p.name.toLowerCase().includes(q)).slice(0, 10);
+            if(!matches.length){ acList.style.display = 'none'; return; }
+            matches.forEach(p => {
+                const a = document.createElement('a');
+                a.href = '#';
+                a.className = 'list-group-item list-group-item-action py-1 px-2 small';
+                a.innerHTML = useStock
+                    ? `${escapeHtml(p.name)} <span class="text-muted">(재고: ${p.qty.toLocaleString()}${p.unit})</span>`
+                    : escapeHtml(p.name);
+                a.addEventListener('mousedown', function(e){
+                    e.preventDefault();
+                    nameInput.value = p.name;
+                    acList.style.display = 'none';
+                    unitEl.textContent = p.unit || '개';
+                    if(useStock){
+                        stockInfo.textContent = `재고:${p.qty.toLocaleString()}`;
+                        stockInfo.className = 'form-text small mat-stock-info text-success';
+                    }
+                    row.querySelector('.mat-qty').focus();
+                });
+                acList.appendChild(a);
+            });
+            acList.style.display = 'block';
+        });
+        nameInput.addEventListener('blur', () => setTimeout(() => acList.style.display = 'none', 200));
+        nameInput.addEventListener('change', function(){
+            const found = stockProducts.find(p => p.name === this.value)
+                       || allProducts.find(p => p.name === this.value);
+            unitEl.textContent = (found && found.unit) ? found.unit : '개';
+            if(found && found.qty != null){
+                stockInfo.textContent = `재고:${found.qty.toLocaleString()}`;
+                stockInfo.className = 'form-text small mat-stock-info text-success';
+            }
+        });
+    }
+
+    // 재료 삭제
+    document.getElementById('materialRows').addEventListener('click', function(e){
+        const btn = e.target.closest('.remove-mat-btn');
+        if(btn){
+            const row = btn.closest('.mat-row');
+            if(row) row.remove();
+            if(!document.querySelectorAll('.mat-row').length && materialEmpty){
+                materialEmpty.style.display = '';
+            }
+        }
+    });
+
+    // ── 소분항목 추가 ──
+    document.getElementById('addItemBtn').addEventListener('click', function(){
+        const outName = document.getElementById('outName').value.trim();
+        const outQty = parseFloat(document.getElementById('outQty').value) || 0;
+        const outCategory = document.getElementById('outCategory').value.trim();
+        const outUnit = document.getElementById('outUnit').value.trim() || '개';
+        const outStorage = document.getElementById('outStorage').value.trim();
+        const outFoodType = document.getElementById('outFoodType').value.trim();
+        const outExpiry = document.getElementById('outExpiry').value;
+        const outMfg = document.getElementById('outMfg').value;
+
+        if(!outName){ alert('산출 품목명을 입력하세요.'); return; }
+        if(outQty <= 0){ alert('산출수량을 입력하세요.'); return; }
+
+        // 재료 수집
+        const materials = [];
+        document.querySelectorAll('.mat-row').forEach(row=>{
+            const name = row.querySelector('.mat-name').value.trim();
+            const qty = parseFloat(row.querySelector('.mat-qty').value) || 0;
+            if(name && qty > 0){
+                materials.push({product_name: name, qty: qty});
+            }
+        });
+
+        pendingItems.push({
+            product_name: outName,
+            qty: outQty,
+            category: outCategory,
+            unit: outUnit,
+            storage_method: outStorage,
+            food_type: outFoodType,
+            expiry_date: outExpiry,
+            manufacture_date: outMfg,
+            materials: materials
+        });
+
+        // 입력 초기화
+        document.getElementById('outName').value = '';
+        document.getElementById('outQty').value = '';
+        document.getElementById('outCategory').value = '반제품';
+        document.getElementById('outUnit').value = '개';
+        document.getElementById('outStorage').value = '';
+        document.getElementById('outFoodType').value = '';
+        document.getElementById('outExpiry').value = '';
+        document.getElementById('outMfg').value = '';
+        document.getElementById('materialRows').innerHTML = '';
+        if(materialEmpty) materialEmpty.style.display = '';
+        currentMaterials = [];
+        matIdCounter = 0;
+
+        renderTable();
+    });
+
+    // ── 대기 목록 렌더링 ──
+    function renderTable(){
+        const tbody = document.querySelector('#pendingTable tbody');
+        tbody.innerHTML = '';
+        let rowNum = 0;
+
+        pendingItems.forEach((item, idx)=>{
+            rowNum++;
+            // 산출품 행
+            const tr = document.createElement('tr');
+            tr.style.backgroundColor = '#d4edda';
+            tr.innerHTML = `
+                <td class="fw-bold">${rowNum}</td>
+                <td class="fw-bold">${escapeHtml(item.product_name)}</td>
+                <td><span class="badge bg-success">산출</span></td>
+                <td class="text-end fw-bold text-success">+${item.qty.toLocaleString()}</td>
+                <td>${escapeHtml(item.unit)}</td>
+                <td><button class="btn btn-outline-danger btn-sm py-0 px-1 del-item" data-idx="${idx}"><i class="bi bi-x"></i></button></td>`;
+            tbody.appendChild(tr);
+
+            // 투입품 행
+            item.materials.forEach(mat=>{
+                const mtr = document.createElement('tr');
+                mtr.style.backgroundColor = '#f8f9fa';
+                mtr.innerHTML = `
+                    <td></td>
+                    <td class="ps-4 text-muted small">ㄴ ${escapeHtml(mat.product_name)}</td>
+                    <td><span class="badge bg-danger">투입</span></td>
+                    <td class="text-end text-danger small">-${mat.qty.toLocaleString()}</td>
+                    <td></td>
+                    <td></td>`;
+                tbody.appendChild(mtr);
+            });
+        });
+
+        document.getElementById('itemCountBadge').textContent = pendingItems.length + '건';
+    }
+
+    // 항목 삭제
+    document.querySelector('#pendingTable').addEventListener('click', function(e){
+        const btn = e.target.closest('.del-item');
+        if(btn){
+            const idx = parseInt(btn.dataset.idx);
+            pendingItems.splice(idx, 1);
+            renderTable();
+        }
+    });
+
+    // 전체 삭제
+    document.getElementById('clearAllBtn').addEventListener('click', function(){
+        if(pendingItems.length && confirm('전체 삭제하시겠습니까?')){
+            pendingItems = [];
+            renderTable();
+        }
+    });
+
+    // ── 일괄 소분 처리 ──
+    document.getElementById('submitBtn').addEventListener('click', function(){
+        if(!pendingItems.length){ alert('소분 항목을 추가하세요.'); return; }
+        const location = document.getElementById('repackLocation').value;
+        if(!location){ alert('작업 위치를 선택하세요.'); return; }
+        if(!confirm(`총 ${pendingItems.length}건의 소분을 처리하시겠습니까?`)) return;
+
+        const payload = {
+            date: document.getElementById('repackDate').value,
+            location: location,
+            items: pendingItems
+        };
+
+        this.disabled = true;
+        this.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 처리 중...';
+
+        fetch('/repack/batch', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json','X-CSRFToken': csrf},
+            body: JSON.stringify(payload)
+        })
+        .then(r=>r.json())
+        .then(data=>{
+            if(data.success){
+                let msg = `소분 처리 완료: 산출 ${data.repack_in_count}건, 투입 ${data.repack_out_count}건`;
+                if(data.doc_nos && data.doc_nos.length) msg += `\n문서번호: ${data.doc_nos.join(', ')}`;
+                if(data.warnings && data.warnings.length) msg += '\n\n⚠ ' + data.warnings.join('\n');
+                alert(msg);
+                pendingItems = [];
+                renderTable();
+            } else {
+                alert('오류: ' + (data.error || '알 수 없는 오류'));
+            }
+        })
+        .catch(e=>alert('통신 오류: '+e))
+        .finally(()=>{
+            this.disabled = false;
+            this.innerHTML = '<i class="bi bi-check-circle"></i> 일괄 소분 처리';
+        });
+    });
+
+    // ── 이력 조회 ──
+    let historyData = [];
+    document.getElementById('histSearchBtn').addEventListener('click', function(){
+        const from = document.getElementById('histFrom').value;
+        const to = document.getElementById('histTo').value;
+        if(!from || !to){ alert('시작일과 종료일을 모두 입력하세요.'); return; }
+
+        const tbody = document.getElementById('histBody');
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-3"><span class="spinner-border spinner-border-sm"></span> 조회 중...</td></tr>';
+
+        fetch(`/repack/api/history?date_from=${from}&date_to=${to}`)
+            .then(r=>r.json())
+            .then(data=>{
+                historyData = Array.isArray(data) ? data : [];
+                if(!historyData.length){
+                    tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">해당 기간의 소분 이력이 없습니다.</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = '';
+                historyData.forEach(r=>{
+                    const isIn = r.type === 'REPACK_IN';
+                    const badge = isIn
+                        ? '<span class="badge bg-success">산출</span>'
+                        : '<span class="badge bg-danger">투입</span>';
+                    const qtyClass = isIn ? 'text-success' : 'text-danger';
+                    const qtyDisplay = isIn ? '+'+Math.abs(r.qty).toLocaleString() : '-'+Math.abs(r.qty).toLocaleString();
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${escapeHtml(r.date)}</td>
+                        <td>${escapeHtml(r.repack_doc_no)}</td>
+                        <td>${escapeHtml(r.product_name)}</td>
+                        <td>${badge}</td>
+                        <td class="text-end ${qtyClass}">${qtyDisplay}</td>
+                        <td>${escapeHtml(r.location)}</td>`;
+                    if(isAdmin && editMode){
+                        const td = document.createElement('td');
+                        td.className = 'text-nowrap';
+                        const eBtn = document.createElement('button');
+                        eBtn.type = 'button';
+                        eBtn.className = 'btn btn-outline-primary btn-sm py-0 px-1';
+                        eBtn.title = '수정';
+                        eBtn.innerHTML = '<i class="bi bi-pencil"></i>';
+                        eBtn.addEventListener('click', function(e) { e.stopPropagation(); window._editHist(String(r.id)); });
+                        const dBtn = document.createElement('button');
+                        dBtn.type = 'button';
+                        dBtn.className = 'btn btn-outline-danger btn-sm py-0 px-1 ms-1';
+                        dBtn.title = '삭제';
+                        dBtn.innerHTML = '<i class="bi bi-trash3"></i>';
+                        dBtn.addEventListener('click', function(e) { e.stopPropagation(); window._deleteHist(String(r.id)); });
+                        td.appendChild(eBtn);
+                        td.appendChild(dBtn);
+                        tr.appendChild(td);
+                    }
+                    tbody.appendChild(tr);
+                });
+            })
+            .catch(e=>{
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-3">조회 중 오류가 발생했습니다.</td></tr>';
+            });
+    });
+
+    // 개별 수정 (admin) — onclick 직접 바인딩
+    window._editHist = function(id) {
+        try {
+            const row = historyData.find(r => String(r.id) === String(id));
+            if(!row){ alert('데이터를 찾을 수 없습니다. (id: '+id+')'); return; }
+            document.getElementById('editId').value = id;
+            document.getElementById('editProductName').value = row.product_name || '';
+            document.getElementById('editQty').value = row.qty || '';
+            document.getElementById('editLocation').value = row.location || '';
+            document.getElementById('editCategory').value = row.category || '';
+            document.getElementById('editUnit').value = row.unit || '';
+            const modalEl = document.getElementById('editModal');
+            if(!modalEl){ alert('editModal 요소를 찾을 수 없습니다.'); return; }
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        } catch(err) { alert('수정 모달 오류: ' + err.message); }
+    };
+    // 개별 삭제 (admin)
+    window._deleteHist = function(id) {
+        if(!confirm('이 이력을 삭제하시겠습니까?')) return;
+        fetch(`/repack/api/delete/${id}`, { method:'POST', headers:{'X-CSRFToken': csrf} })
+            .then(r=>r.json())
+            .then(data=>{ if(data.success){ document.getElementById('histSearchBtn').click(); } else alert('처리 실패: '+(data.error||'')); })
+            .catch(e=>alert('통신 오류: '+e));
+    };
+
+    // 수정 저장
+    if(isAdmin){
+        document.getElementById('editSaveBtn').addEventListener('click', async function(){
+            const id = document.getElementById('editId').value;
+            const payload = {
+                product_name: document.getElementById('editProductName').value.trim(),
+                qty: parseFloat(document.getElementById('editQty').value) || 0,
+                location: document.getElementById('editLocation').value.trim(),
+                category: document.getElementById('editCategory').value.trim(),
+                unit: document.getElementById('editUnit').value.trim(),
+            };
+            if(!payload.product_name){ alert('품목명을 입력하세요.'); return; }
+            this.disabled = true;
+            try {
+                const res = await fetch(`/repack/api/update/${id}`, {
+                    method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':csrf},
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                if(data.success){
+                    bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
+                    document.getElementById('histSearchBtn').click();
+                } else { alert('수정 실패: '+(data.error||'')); }
+            } catch(e){ alert('통신 오류: '+e); }
+            finally { this.disabled = false; }
+        });
+    }
+
+})();
+</script>
+{% endblock %}

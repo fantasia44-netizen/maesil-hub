@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}이력 관리 - 배마마 통합시스템{% endblock %}
+{% block page_title %}이력 관리{% endblock %}
+
+{% block content %}
+<!-- 검색 필터 -->
+<div class="card mb-4">
+    <div class="card-body">
+        <form method="GET" action="{{ url_for('history.index') }}" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label fw-semibold">품목명</label>
+                <input type="text" name="product_name" class="form-control" value="{{ product_name|default('') }}" placeholder="품목명 검색">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">시작일</label>
+                <input type="date" name="date_from" class="form-control" value="{{ date_from|default('') }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">종료일</label>
+                <input type="date" name="date_to" class="form-control" value="{{ date_to|default('') }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold">유형</label>
+                <select name="type" class="form-select">
+                    <option value="">전체</option>
+                    {% for code, label in type_labels.items() %}
+                    <option value="{{ code }}" {% if record_type|default('') == code %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3 d-flex align-items-end gap-1">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-search"></i> 검색
+                </button>
+                <a href="{{ url_for('history.index') }}" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-counterclockwise"></i> 초기화
+                </a>
+                {% if records is defined and records %}
+                <a href="{{ url_for('history.excel', date_from=date_from|default(''), date_to=date_to|default(''), type=record_type|default(''), product_name=product_name|default('')) }}"
+                   class="btn btn-outline-success" title="엑셀 다운로드">
+                    <i class="bi bi-file-earmark-excel"></i>
+                </a>
+                {% endif %}
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 결과 테이블 -->
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-clock-history"></i> 이력 목록 ({{ records|default([])|length }}건)</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>날짜</th>
+                        <th>유형</th>
+                        <th>품목명</th>
+                        <th class="text-center" style="width:60px">SKU</th>
+                        <th class="text-end">수량</th>
+                        <th>단위</th>
+                        <th>위치</th>
+                        <th>카테고리</th>
+                        <th>식품유형</th>
+                        <th>보관</th>
+                        <th>제조일</th>
+                        <th>소비기한</th>
+                        <th style="width:120px">관리</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rec in records|default([]) %}
+                    <tr>
+                        <td>{{ rec.id }}</td>
+                        <td>{{ rec.transaction_date|default(rec.date|default('-')) }}</td>
+                        <td>
+                            {% set t = rec.type|default('') %}
+                            {% if t in ('INBOUND',) %}
+                                <span class="badge bg-primary">{{ type_labels.get(t, t) }}</span>
+                            {% elif t in ('PRODUCTION', 'PROD_OUT') %}
+                                <span class="badge bg-success">{{ type_labels.get(t, t) }}</span>
+                            {% elif t in ('SALES_OUT',) %}
+                                <span class="badge bg-warning text-dark">{{ type_labels.get(t, t) }}</span>
+                            {% elif t in ('MOVE_OUT', 'MOVE_IN') %}
+                                <span class="badge bg-info">{{ type_labels.get(t, t) }}</span>
+                            {% elif t in ('REPACK_OUT', 'REPACK_IN') %}
+                                <span class="badge bg-secondary">{{ type_labels.get(t, t) }}</span>
+                            {% elif t == 'INIT' %}
+                                <span class="badge bg-dark">{{ type_labels.get(t, t) }}</span>
+                            {% else %}
+                                <span class="badge bg-dark">{{ type_labels.get(t, t) }}</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ rec.product_name }}</td>
+                        <td class="text-center text-muted small">{{ sku_map.get(rec.product_name, '-') }}</td>
+                        <td class="text-end">{{ rec.qty|fmt_qty }}</td>
+                        <td>{{ rec.unit|default('-') }}</td>
+                        <td>{{ rec.location|default('-') }}</td>
+                        <td>{{ rec.category|default('-') }}</td>
+                        <td>{% if rec.food_type %}<span class="badge {% if rec.food_type == '농산물' %}bg-success{% elif rec.food_type == '수산물' %}bg-primary{% elif rec.food_type == '축산물' %}bg-danger{% else %}bg-secondary{% endif %} small">{{ rec.food_type }}</span>{% else %}-{% endif %}</td>
+                        <td>{{ rec.storage_method|default('-') }}</td>
+                        <td>{{ rec.manufacture_date|default('-') }}</td>
+                        <td>{{ rec.expiry_date|default('-') }}</td>
+                        <td>
+                            {% set _rtype = rec.type %}
+                            {% set _src = {
+                                'PRODUCTION': ('생산관리', 'production.index'),
+                                'PROD_OUT':   ('생산관리', 'production.index'),
+                                'ADJUSTMENT': ('재고조정', 'adjustment.index'),
+                                'REPACK_IN':  ('소분', 'repack.index'),
+                                'REPACK_OUT': ('소분', 'repack.index'),
+                                'INBOUND':    ('입고', 'inbound.index'),
+                            }.get(_rtype) %}
+                            {% if _src %}
+                              <a href="{{ url_for(_src[1]) }}" class="btn btn-sm btn-outline-secondary"
+                                 title="{{ _src[0] }}에서 수정">
+                                <i class="bi bi-arrow-up-right-square"></i> {{ _src[0] }}
+                              </a>
+                            {% else %}
+                              <span class="text-muted small"><i class="bi bi-info-circle"></i> 원본에서 수정</span>
+                            {% endif %}
+                            {% if current_user.role == 'admin' %}
+                            <form method="POST" action="{{ url_for('history.delete', row_id=rec.id) }}" class="d-inline"
+                                  onsubmit="return confirm('이 이력을 삭제하시겠습니까?')">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="btn btn-sm btn-outline-danger" title="삭제">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="14" class="text-center text-muted py-4">검색 결과가 없습니다.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- 수정 모달 -->
+<div class="modal fade" id="editModal" tabindex="-1" aria-labelledby="editModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="editForm" method="POST" action="">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="editModalLabel">이력 수정</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">날짜</label>
+                        <input type="date" name="transaction_date" id="edit_transaction_date" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">유형</label>
+                        <select name="type" id="edit_type" class="form-select">
+                            {% for code, label in type_labels.items() %}
+                            <option value="{{ code }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">품목명</label>
+                        <input type="text" name="product_name" id="edit_product_name" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">수량</label>
+                        <input type="number" name="qty" id="edit_qty" class="form-control" step="any">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">단위</label>
+                        <input type="text" name="unit" id="edit_unit" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">위치</label>
+                        <input type="text" name="location" id="edit_location" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">카테고리</label>
+                        <input type="text" name="category" id="edit_category" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">식품유형</label>
+                        <select name="food_type" id="edit_food_type" class="form-select">
+                            <option value="">선택</option>
+                            <option value="농산물">농산물</option>
+                            <option value="수산물">수산물</option>
+                            <option value="축산물">축산물</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">보관방법</label>
+                        <select name="storage_method" id="edit_storage_method" class="form-select">
+                            <option value="">선택</option>
+                            <option value="냉동">냉동</option>
+                            <option value="냉장">냉장</option>
+                            <option value="실온">실온</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">제조일자</label>
+                        <input type="date" name="manufacture_date" id="edit_manufacture_date" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">소비기한</label>
+                        <input type="date" name="expiry_date" id="edit_expiry_date" class="form-control">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-primary">저장</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function openEditModal(rec) {
+    try {
+        document.getElementById('editForm').action = '/history/edit/' + rec.id;
+        document.getElementById('edit_transaction_date').value = rec.transaction_date || rec.date || '';
+        document.getElementById('edit_type').value = rec.type || '';
+        document.getElementById('edit_product_name').value = rec.product_name || '';
+        document.getElementById('edit_qty').value = rec.qty || '';
+        document.getElementById('edit_unit').value = rec.unit || '';
+        document.getElementById('edit_location').value = rec.location || '';
+        document.getElementById('edit_category').value = rec.category || '';
+        document.getElementById('edit_food_type').value = rec.food_type || '';
+        document.getElementById('edit_storage_method').value = rec.storage_method || '';
+        document.getElementById('edit_manufacture_date').value = rec.manufacture_date || '';
+        document.getElementById('edit_expiry_date').value = rec.expiry_date || '';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('editModal')).show();
+    } catch(err) {
+        alert('수정 모달 오류: ' + err.message);
+    }
+}
+</script>
+{% endblock %}

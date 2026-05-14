@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+
+{% block page_title %}카드 이용내역{% endblock %}
+
+{% block content %}
+<!-- 필터 바 -->
+<div class="card shadow-sm mb-3">
+    <div class="card-body py-2">
+        <form method="get" class="row g-2 align-items-end">
+            <div class="col-auto">
+                <label class="form-label small mb-0">시작일</label>
+                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from }}">
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">종료일</label>
+                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to }}">
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">카드</label>
+                <select name="account_id" class="form-select form-select-sm">
+                    <option value="">전체 카드</option>
+                    {% for acc in accounts %}
+                    <option value="{{ acc.id }}" {% if account_id|string == acc.id|string %}selected{% endif %}>
+                        {{ acc.bank_name }} ({{ acc.account_number[-4:] }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-auto">
+                <label class="form-label small mb-0">가맹점 검색</label>
+                <input type="text" name="search" class="form-control form-control-sm"
+                       value="{{ search or '' }}" placeholder="가맹점명 검색...">
+            </div>
+            <div class="col-auto">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-search"></i> 조회
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 요약 카드 -->
+<div class="row g-3 mb-3">
+    <div class="col-md-4">
+        <div class="card shadow-sm border-start border-danger border-3">
+            <div class="card-body py-3">
+                <div class="text-muted small">이용 합계</div>
+                <div class="fs-5 fw-bold text-danger">{{ summary.total_amount|fmt_money }}원</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm border-start border-secondary border-3">
+            <div class="card-body py-3">
+                <div class="text-muted small">취소 합계</div>
+                <div class="fs-5 fw-bold text-secondary">{{ summary.cancelled_amount|fmt_money }}원</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm border-start border-warning border-3">
+            <div class="card-body py-3">
+                <div class="text-muted small">순이용액</div>
+                <div class="fs-5 fw-bold text-warning">{{ summary.net_amount|fmt_money }}원</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 카드내역 테이블 -->
+<div class="card shadow-sm">
+    <div class="card-header bg-white d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-credit-card"></i> 카드 이용내역</span>
+        <div>
+            <form method="post" action="{{ url_for('bank.sync_card_all') }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-outline-primary btn-sm">
+                    <i class="bi bi-arrow-repeat"></i> 전체 동기화
+                </button>
+            </form>
+            <span class="badge bg-secondary ms-2">{{ transactions|length }}건</span>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>이용일</th>
+                        <th>시간</th>
+                        <th>카드</th>
+                        <th>가맹점</th>
+                        <th class="text-end">금액</th>
+                        <th class="text-center">구분</th>
+                        <th>할부</th>
+                        <th>승인번호</th>
+                        <th>분류</th>
+                        <th>비고</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tx in transactions %}
+                    <tr {% if tx.is_cancelled %}class="text-decoration-line-through text-muted"{% endif %}>
+                        <td class="small">{{ tx.approval_date }}</td>
+                        <td class="text-muted small">{{ tx.approval_time or '' }}</td>
+                        <td class="small">{{ tx.bank_accounts.bank_name if tx.bank_accounts else '' }} ({{ tx.bank_accounts.account_number[-4:] if tx.bank_accounts else '' }})</td>
+                        <td>{{ tx.merchant_name or '-' }}</td>
+                        <td class="text-end fw-bold text-danger">
+                            {% if tx.is_cancelled %}<del>{% endif %}
+                            {{ tx.amount|fmt_money }}원
+                            {% if tx.is_cancelled %}</del>{% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if tx.is_cancelled %}
+                            <span class="badge bg-secondary">취소</span>
+                            {% elif tx.card_type == '체크' %}
+                            <span class="badge bg-info">체크</span>
+                            {% else %}
+                            <span class="badge bg-warning text-dark">신용</span>
+                            {% endif %}
+                        </td>
+                        <td class="small">{{ tx.installment or '일시불' }}</td>
+                        <td class="text-muted small">{{ tx.approval_no or '' }}</td>
+                        <td>
+                            <select class="form-select form-select-sm card-category-select"
+                                    data-tx-id="{{ tx.id }}" style="min-width:90px; font-size:0.8rem">
+                                {% for cat in categories %}
+                                <option value="{{ cat }}" {% if tx.category == cat %}selected{% endif %}>
+                                    {{ cat }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </td>
+                        <td class="text-muted small">{{ tx.description or '' }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="10" class="text-center text-muted py-4">
+                            <i class="bi bi-credit-card"></i> 카드 이용내역이 없습니다. 동기화를 실행하세요.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+/* 카테고리 인라인 수정 */
+document.querySelectorAll('.card-category-select').forEach(sel => {
+    sel.addEventListener('change', function() {
+        const txId = this.dataset.txId;
+        const category = this.value;
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+
+        fetch(`/bank/api/card-transaction/${txId}/category`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken,
+            },
+            body: JSON.stringify({ category: category }),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) alert('분류 수정 실패: ' + (data.error || ''));
+        })
+        .catch(err => alert('오류: ' + err));
+    });
+});
+</script>
+{% endblock %}

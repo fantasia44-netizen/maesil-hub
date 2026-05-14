@@ -1,0 +1,684 @@
+{% extends "base.html" %}
+{% block title %}데이터 정합성 검사{% endblock %}
+{% block page_title %}데이터 정합성 검사{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-3 py-2">
+
+    <!-- 탭 네비 -->
+    <ul class="nav nav-tabs mb-3" id="integrityTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="tab-basic-btn" data-bs-toggle="tab"
+                    data-bs-target="#tab-basic" type="button" role="tab">
+                <i class="bi bi-shield-check"></i> 정합성 검사
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-outbound-btn" data-bs-toggle="tab"
+                    data-bs-target="#tab-outbound" type="button" role="tab">
+                <i class="bi bi-truck"></i> 출고 검증 (송장 역산)
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-invord-btn" data-bs-toggle="tab"
+                    data-bs-target="#tab-invord" type="button" role="tab">
+                <i class="bi bi-table"></i> 송장출고 vs 주문수집 비교
+            </button>
+        </li>
+    </ul>
+
+    <div class="tab-content">
+    <!-- ═══ 탭1: 기존 정합성 검사 ═══ -->
+    <div class="tab-pane fade show active" id="tab-basic" role="tabpanel">
+
+    <!-- 검사 실행 -->
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <div class="row align-items-end g-2">
+                <div class="col-auto">
+                    <label class="form-label small mb-0">시작일</label>
+                    <input type="date" id="dateFrom" class="form-control form-control-sm">
+                </div>
+                <div class="col-auto">
+                    <label class="form-label small mb-0">종료일</label>
+                    <input type="date" id="dateTo" class="form-control form-control-sm">
+                </div>
+                <div class="col-auto">
+                    <button id="runBtn" class="btn btn-primary btn-sm">
+                        <i class="bi bi-shield-check"></i> 정합성 검사 실행
+                    </button>
+                </div>
+                <div class="col-auto">
+                    <button id="quickBtn" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-lightning"></i> 빠른 점검
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 결과 요약 -->
+    <div id="summaryArea" class="mb-3" style="display:none;">
+        <div class="row g-2">
+            <div class="col-md-3">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body text-center py-2">
+                        <div id="statusIcon" class="fs-1"></div>
+                        <div id="statusText" class="fw-bold small"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-danger border-0 shadow-sm">
+                    <div class="card-body text-center py-2">
+                        <div class="text-danger fs-3 fw-bold" id="criticalCount">0</div>
+                        <div class="small text-muted">Critical</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-warning border-0 shadow-sm">
+                    <div class="card-body text-center py-2">
+                        <div class="text-warning fs-3 fw-bold" id="warningCount">0</div>
+                        <div class="small text-muted">Warning</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-info border-0 shadow-sm">
+                    <div class="card-body text-center py-2">
+                        <div class="text-info fs-3 fw-bold" id="infoCount">0</div>
+                        <div class="small text-muted">Info</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 상세 이슈 -->
+    <div id="issuesArea" class="mb-3" style="display:none;">
+        <div class="card">
+            <div class="card-header py-2"><strong class="small">검사 상세 결과</strong></div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="small" style="width:100px">구분</th>
+                            <th class="small" style="width:120px">검사항목</th>
+                            <th class="small">내용</th>
+                        </tr>
+                    </thead>
+                    <tbody id="issuesBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 이력 -->
+    <div class="card">
+        <div class="card-header py-2">
+            <strong class="small">검사 이력</strong>
+            <button id="loadHistBtn" class="btn btn-sm btn-outline-secondary float-end py-0 px-2">
+                <i class="bi bi-arrow-clockwise"></i> 조회
+            </button>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="small">날짜</th>
+                        <th class="small">결과</th>
+                        <th class="small">Critical</th>
+                        <th class="small">Warning</th>
+                        <th class="small">요약</th>
+                    </tr>
+                </thead>
+                <tbody id="historyBody">
+                    <tr><td colspan="5" class="text-center text-muted small py-2">'조회' 클릭</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    </div><!-- /tab-basic -->
+
+    <!-- ═══ 탭2: 출고 검증 (송장 역산) ═══ -->
+    <div class="tab-pane fade" id="tab-outbound" role="tabpanel">
+
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <div class="row align-items-end g-2">
+                <div class="col-auto">
+                    <label class="form-label small mb-0">시작일</label>
+                    <input type="date" id="obDateFrom" class="form-control form-control-sm">
+                </div>
+                <div class="col-auto">
+                    <label class="form-label small mb-0">종료일</label>
+                    <input type="date" id="obDateTo" class="form-control form-control-sm">
+                </div>
+                <div class="col-auto">
+                    <button id="obRunBtn" class="btn btn-primary btn-sm">
+                        <i class="bi bi-truck"></i> 출고 검증 실행
+                    </button>
+                </div>
+                <div class="col-auto ms-auto small text-muted">
+                    기준: order_date · SALES_OUT(-SALES_RETURN) vs 송장발행된 주문의 order_transactions
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 요약 -->
+    <div id="obSummary" class="mb-3" style="display:none;">
+        <div class="row g-2">
+            <div class="col-md-3">
+                <div class="card border-0 shadow-sm"><div class="card-body text-center py-2">
+                    <div class="fs-3 fw-bold text-primary" id="obLedgerTotal">0</div>
+                    <div class="small text-muted">A) 재고차감 합계 (SALES_OUT-RETURN)</div>
+                </div></div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-0 shadow-sm"><div class="card-body text-center py-2">
+                    <div class="fs-3 fw-bold text-info" id="obInvoiceTotal">0</div>
+                    <div class="small text-muted">B) 송장 역산 합계</div>
+                </div></div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-0 shadow-sm"><div class="card-body text-center py-2">
+                    <div class="fs-3 fw-bold" id="obDiffTotal">0</div>
+                    <div class="small text-muted">총 차이 (A - B)</div>
+                </div></div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-0 shadow-sm"><div class="card-body text-center py-2">
+                    <div class="fs-3 fw-bold text-warning" id="obDiffCount">0</div>
+                    <div class="small text-muted">불일치 품목 수</div>
+                </div></div>
+            </div>
+        </div>
+        <div class="small text-muted mt-1" id="obOrderStat"></div>
+    </div>
+
+    <!-- 필터 & 결과 테이블 -->
+    <div id="obTableArea" class="card" style="display:none;">
+        <div class="card-header py-2 d-flex align-items-center gap-2">
+            <strong class="small">품목별 비교</strong>
+            <select id="obFilter" class="form-select form-select-sm ms-2" style="width:auto">
+                <option value="all">전체</option>
+                <option value="diff">불일치만</option>
+                <option value="ledger_more">재고차감 초과 (A &gt; B)</option>
+                <option value="invoice_more">송장 초과 (A &lt; B)</option>
+            </select>
+            <input type="text" id="obSearch" class="form-control form-control-sm" placeholder="품목 검색..." style="width:200px">
+            <button id="obExportBtn" class="btn btn-sm btn-outline-success ms-auto py-0 px-2">
+                <i class="bi bi-file-earmark-excel"></i> CSV
+            </button>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="small">품목</th>
+                        <th class="text-end small" style="width:120px">A: 재고차감</th>
+                        <th class="text-end small" style="width:120px">B: 송장역산</th>
+                        <th class="text-end small" style="width:100px">차이 (A-B)</th>
+                        <th class="text-center small" style="width:100px">상태</th>
+                    </tr>
+                </thead>
+                <tbody id="obTbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    </div><!-- /tab-outbound -->
+
+    <!-- ═══ 탭3: 송장출고 vs 주문수집 일자별 비교 ═══ -->
+    <div class="tab-pane fade" id="tab-invord" role="tabpanel">
+
+    <div class="card mb-3">
+        <div class="card-body py-2">
+            <div class="row align-items-end g-2">
+                <div class="col-auto">
+                    <label class="form-label small mb-0">시작일</label>
+                    <input type="date" id="ioDateFrom" class="form-control form-control-sm">
+                </div>
+                <div class="col-auto">
+                    <label class="form-label small mb-0">종료일</label>
+                    <input type="date" id="ioDateTo" class="form-control form-control-sm">
+                </div>
+                <div class="col-auto">
+                    <button id="ioRunBtn" class="btn btn-primary btn-sm">
+                        <i class="bi bi-table"></i> 비교 실행
+                    </button>
+                </div>
+                <div class="col-auto ms-auto small text-muted">
+                    A) 주문수집 통합집계(get_channel_orders_agg) vs B) 송장발행된 주문의 order_transactions × option_master 완제품
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 요약 카드 -->
+    <div id="ioSummary" class="mb-3" style="display:none;">
+        <div class="row g-2">
+            <div class="col-md-3">
+                <div class="card border-0 shadow-sm"><div class="card-body text-center py-2">
+                    <div class="fs-3 fw-bold text-primary" id="ioATotal">0</div>
+                    <div class="small text-muted">A) 주문수집 합계</div>
+                </div></div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-0 shadow-sm"><div class="card-body text-center py-2">
+                    <div class="fs-3 fw-bold text-info" id="ioBTotal">0</div>
+                    <div class="small text-muted">B) 송장출고 합계</div>
+                </div></div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-0 shadow-sm"><div class="card-body text-center py-2">
+                    <div class="fs-3 fw-bold" id="ioDiffTotal">0</div>
+                    <div class="small text-muted">차이 (A - B)</div>
+                </div></div>
+            </div>
+            <div class="col-md-3">
+                <div class="card border-0 shadow-sm"><div class="card-body text-center py-2">
+                    <div class="fs-3 fw-bold text-warning" id="ioInvCount">0</div>
+                    <div class="small text-muted">송장 발행 주문 수</div>
+                </div></div>
+            </div>
+        </div>
+        <div class="small text-muted mt-1" id="ioMeta"></div>
+    </div>
+
+    <!-- 일자별 표 -->
+    <div id="ioTableArea" class="card" style="display:none;">
+        <div class="card-header py-2 d-flex align-items-center gap-2">
+            <strong class="small">일자별 총합 비교</strong>
+            <select id="ioFilter" class="form-select form-select-sm ms-2" style="width:auto">
+                <option value="all">전체</option>
+                <option value="diff">차이 있는 날만</option>
+            </select>
+            <span class="ms-auto small text-muted">행 클릭 → 품목별 상세</span>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="small">일자</th>
+                        <th class="text-end small">A: 주문수집</th>
+                        <th class="text-end small">B: 송장출고</th>
+                        <th class="text-end small">차이 (A-B)</th>
+                        <th class="small">A 채널별</th>
+                        <th class="small">B 채널별</th>
+                    </tr>
+                </thead>
+                <tbody id="ioTbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 품목 drilldown -->
+    <div id="ioDrillArea" class="card mt-3" style="display:none;">
+        <div class="card-header py-2">
+            <strong class="small" id="ioDrillTitle">품목별 상세</strong>
+            <button class="btn btn-sm btn-link float-end py-0 px-2"
+                    onclick="document.getElementById('ioDrillArea').style.display='none'">닫기</button>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="small">품목 (완제품)</th>
+                        <th class="text-end small">송장출고 수량</th>
+                    </tr>
+                </thead>
+                <tbody id="ioDrillBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 미매칭 품목 경고 -->
+    <div id="ioUnmatchedArea" class="alert alert-warning mt-3 py-2" style="display:none;">
+        <strong class="small">⚠️ option_master 미매칭 품목 (집계에서 제외됨)</strong>
+        <div id="ioUnmatchedList" class="small mt-1"></div>
+    </div>
+
+    </div><!-- /tab-invord -->
+    </div><!-- /tab-content -->
+</div>
+
+<script>
+const csrf_token = document.querySelector('meta[name="csrf-token"]').content;
+function escapeHtml(t) {
+    const d = document.createElement('div'); d.textContent = t; return d.innerHTML;
+}
+
+const sevBadge = {
+    critical: '<span class="badge bg-danger">Critical</span>',
+    warning: '<span class="badge bg-warning text-dark">Warning</span>',
+    info: '<span class="badge bg-info text-dark">Info</span>',
+};
+
+// 검사 실행
+document.getElementById('runBtn').addEventListener('click', async function() {
+    const btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 검사 중...';
+
+    try {
+        const res = await fetch('/integrity/api/run', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json', 'X-CSRFToken': csrf_token},
+            body: JSON.stringify({
+                date_from: document.getElementById('dateFrom').value,
+                date_to: document.getElementById('dateTo').value,
+            }),
+        });
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+            alert('세션 만료. 새로고침 해주세요.');
+            return;
+        }
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        showResult(data);
+    } catch(e) { alert(e.message); }
+    finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-shield-check"></i> 정합성 검사 실행';
+    }
+});
+
+// 빠른 점검
+document.getElementById('quickBtn').addEventListener('click', async function() {
+    const btn = this;
+    btn.disabled = true;
+    try {
+        const res = await fetch('/integrity/api/quick-check');
+        const data = await res.json();
+        showResult({
+            passed: data.critical === 0,
+            critical_count: data.critical,
+            warning_count: data.warning,
+            info_count: 0,
+            issues: data.issues || [],
+        });
+    } catch(e) { alert(e.message); }
+    finally { btn.disabled = false; }
+});
+
+function showResult(data) {
+    document.getElementById('summaryArea').style.display = '';
+    document.getElementById('issuesArea').style.display = '';
+
+    document.getElementById('statusIcon').textContent = data.passed ? '✅' : '❌';
+    document.getElementById('statusText').textContent = data.passed ? '통과' : '이상 발견';
+    document.getElementById('criticalCount').textContent = data.critical_count;
+    document.getElementById('warningCount').textContent = data.warning_count;
+    document.getElementById('infoCount').textContent = data.info_count || 0;
+
+    const tbody = document.getElementById('issuesBody');
+    tbody.innerHTML = '';
+    (data.issues || []).forEach(i => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${sevBadge[i.severity] || i.severity}</td>
+            <td class="small">${escapeHtml(i.check_name)}</td>
+            <td class="small">${escapeHtml(i.message)}</td>`;
+        tbody.appendChild(tr);
+    });
+    if (!data.issues || !data.issues.length) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted small py-2">이슈 없음</td></tr>';
+    }
+}
+
+// 이력 조회
+document.getElementById('loadHistBtn').addEventListener('click', async function() {
+    try {
+        const res = await fetch('/integrity/api/reports');
+        const rows = await res.json();
+        const tbody = document.getElementById('historyBody');
+        tbody.innerHTML = '';
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted small py-2">이력 없음</td></tr>';
+            return;
+        }
+        rows.forEach(r => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="small">${r.check_date || ''}</td>
+                <td>${r.passed ? '<span class="badge bg-success">통과</span>' : '<span class="badge bg-danger">이상</span>'}</td>
+                <td class="small text-danger fw-bold">${r.critical_count || 0}</td>
+                <td class="small text-warning">${r.warning_count || 0}</td>
+                <td class="small">${escapeHtml(r.summary || '')}</td>`;
+            tbody.appendChild(tr);
+        });
+    } catch(e) { console.error(e); }
+});
+
+// 기본 날짜 설정
+(function() {
+    const today = new Date().toISOString().slice(0, 10);
+    const d30 = new Date(Date.now() - 30*86400000).toISOString().slice(0, 10);
+    document.getElementById('dateFrom').value = d30;
+    document.getElementById('dateTo').value = today;
+    document.getElementById('obDateFrom').value = d30;
+    document.getElementById('obDateTo').value = today;
+})();
+
+// ═══ 출고 검증 (탭2) ═══
+let _obItems = [];
+const fmtN = n => (n||0).toLocaleString();
+
+document.getElementById('obRunBtn').addEventListener('click', async function() {
+    const btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 검증 중...';
+    try {
+        const params = new URLSearchParams({
+            date_from: document.getElementById('obDateFrom').value,
+            date_to: document.getElementById('obDateTo').value,
+        });
+        const res = await fetch('/integrity/api/outbound-validate?' + params);
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        renderOutbound(data);
+    } catch(e) { alert(e.message); }
+    finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-truck"></i> 출고 검증 실행';
+    }
+});
+
+function renderOutbound(data) {
+    document.getElementById('obSummary').style.display = '';
+    document.getElementById('obTableArea').style.display = '';
+
+    const diffTotal = (data.stock_ledger_total||0) - (data.invoice_reverse_total||0);
+    document.getElementById('obLedgerTotal').textContent = fmtN(data.stock_ledger_total);
+    document.getElementById('obInvoiceTotal').textContent = fmtN(data.invoice_reverse_total);
+    document.getElementById('obDiffTotal').textContent = (diffTotal >= 0 ? '+' : '') + fmtN(diffTotal);
+    document.getElementById('obDiffTotal').className = 'fs-3 fw-bold ' +
+        (diffTotal === 0 ? 'text-success' : (diffTotal > 0 ? 'text-danger' : 'text-warning'));
+    document.getElementById('obDiffCount').textContent = fmtN(data.diff_count);
+    document.getElementById('obOrderStat').textContent =
+        `기간: ${data.date_from} ~ ${data.date_to} · 전체 주문 ${fmtN(data.total_orders)}건 중 송장발행 ${fmtN(data.invoiced_orders)}건 · 품목 ${fmtN(data.product_count)}종`;
+
+    _obItems = data.items || [];
+    renderOutboundTable();
+}
+
+function renderOutboundTable() {
+    const filter = document.getElementById('obFilter').value;
+    const search = document.getElementById('obSearch').value.trim().toLowerCase();
+    const tbody = document.getElementById('obTbody');
+
+    let rows = _obItems.slice();
+    if (filter === 'diff') rows = rows.filter(r => r.diff !== 0);
+    else if (filter === 'ledger_more') rows = rows.filter(r => r.status === 'ledger_more');
+    else if (filter === 'invoice_more') rows = rows.filter(r => r.status === 'invoice_more');
+    if (search) rows = rows.filter(r => (r.product_name||'').toLowerCase().includes(search));
+
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted small py-3">결과 없음</td></tr>';
+        return;
+    }
+    const badge = {
+        match: '<span class="badge bg-success">일치</span>',
+        ledger_more: '<span class="badge bg-danger">A&gt;B</span>',
+        invoice_more: '<span class="badge bg-warning text-dark">A&lt;B</span>',
+    };
+    tbody.innerHTML = rows.map(r => {
+        const diffCls = r.diff === 0 ? 'text-muted' : (r.diff > 0 ? 'text-danger fw-bold' : 'text-warning fw-bold');
+        const diffStr = (r.diff > 0 ? '+' : '') + fmtN(r.diff);
+        return `<tr>
+            <td class="small">${escapeHtml(r.product_name)}</td>
+            <td class="text-end small">${fmtN(r.qty_ledger)}</td>
+            <td class="text-end small">${fmtN(r.qty_invoice)}</td>
+            <td class="text-end small ${diffCls}">${diffStr}</td>
+            <td class="text-center">${badge[r.status] || r.status}</td>
+        </tr>`;
+    }).join('');
+}
+
+document.getElementById('obFilter').addEventListener('change', renderOutboundTable);
+document.getElementById('obSearch').addEventListener('input', renderOutboundTable);
+
+// ═══ 탭3: 송장출고 vs 주문수집 비교 ═══
+let _ioResult = null;
+
+document.getElementById('ioRunBtn').addEventListener('click', async function() {
+    const btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 집계 중...';
+    try {
+        const params = new URLSearchParams({
+            date_from: document.getElementById('ioDateFrom').value,
+            date_to: document.getElementById('ioDateTo').value,
+        });
+        const res = await fetch('/integrity/api/invoice-vs-order?' + params);
+        const data = await res.json();
+        if (data.error) { alert(data.error); return; }
+        _ioResult = data;
+        renderIO(data);
+    } catch(e) { alert(e.message); }
+    finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-table"></i> 비교 실행';
+    }
+});
+
+function renderIO(data) {
+    document.getElementById('ioSummary').style.display = '';
+    document.getElementById('ioTableArea').style.display = '';
+    document.getElementById('ioDrillArea').style.display = 'none';
+
+    document.getElementById('ioATotal').textContent = fmtN(data.total_order);
+    document.getElementById('ioBTotal').textContent = fmtN(data.total_invoice);
+    const d = data.total_diff || 0;
+    const diffEl = document.getElementById('ioDiffTotal');
+    diffEl.textContent = (d >= 0 ? '+' : '') + fmtN(d);
+    diffEl.className = 'fs-3 fw-bold ' + (d === 0 ? 'text-success' : (d > 0 ? 'text-danger' : 'text-warning'));
+    document.getElementById('ioInvCount').textContent = fmtN(data.invoiced_orders);
+
+    document.getElementById('ioMeta').textContent =
+        `기간: ${data.date_from} ~ ${data.date_to} · option_master 완제품 ${fmtN(data.product_master_count)}종 기준`;
+
+    // 미매칭 품목 경고
+    const unmatched = data.unmatched_products || {};
+    const unmatchedKeys = Object.keys(unmatched).sort((a, b) => unmatched[b] - unmatched[a]);
+    const unmatchedArea = document.getElementById('ioUnmatchedArea');
+    if (unmatchedKeys.length) {
+        unmatchedArea.style.display = '';
+        const top = unmatchedKeys.slice(0, 20);
+        document.getElementById('ioUnmatchedList').innerHTML =
+            top.map(k => `<span class="badge bg-light text-dark border me-1 mb-1">${escapeHtml(k)} (${fmtN(unmatched[k])})</span>`).join('') +
+            (unmatchedKeys.length > 20 ? `<span class="text-muted">... 외 ${unmatchedKeys.length - 20}종</span>` : '');
+    } else {
+        unmatchedArea.style.display = 'none';
+    }
+
+    renderIOTable();
+}
+
+function renderIOTable() {
+    if (!_ioResult) return;
+    const filter = document.getElementById('ioFilter').value;
+    let rows = (_ioResult.comparison || []).slice();
+    if (filter === 'diff') rows = rows.filter(r => r.diff !== 0);
+
+    const tbody = document.getElementById('ioTbody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted small py-3">결과 없음</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(r => {
+        const diffCls = r.diff === 0 ? 'text-muted' : (r.diff > 0 ? 'text-danger fw-bold' : 'text-warning fw-bold');
+        const diffStr = (r.diff > 0 ? '+' : '') + fmtN(r.diff);
+        const groupsA = Object.entries(r.order_by_group || {})
+            .filter(([_, v]) => v > 0)
+            .map(([k, v]) => `${k}:${fmtN(v)}`).join(' ');
+        const groupsB = Object.entries(r.invoice_by_group || {})
+            .filter(([_, v]) => v > 0)
+            .map(([k, v]) => `${k}:${fmtN(v)}`).join(' ');
+        return `<tr class="io-row" data-date="${r.date}" style="cursor:pointer">
+            <td class="small">${r.date}</td>
+            <td class="text-end small">${fmtN(r.order_total)}</td>
+            <td class="text-end small">${fmtN(r.invoice_total)}</td>
+            <td class="text-end small ${diffCls}">${diffStr}</td>
+            <td class="small text-muted">${groupsA || '-'}</td>
+            <td class="small text-muted">${groupsB || '-'}</td>
+        </tr>`;
+    }).join('');
+
+    tbody.querySelectorAll('.io-row').forEach(tr => {
+        tr.addEventListener('click', () => showIODrill(tr.dataset.date));
+    });
+}
+
+function showIODrill(date) {
+    if (!_ioResult) return;
+    const prods = (_ioResult.product_by_date || {})[date] || [];
+    document.getElementById('ioDrillTitle').textContent = `${date} - 품목별 송장출고 수량 (완제품만)`;
+    const tbody = document.getElementById('ioDrillBody');
+    if (!prods.length) {
+        tbody.innerHTML = '<tr><td colspan="2" class="text-center text-muted small py-3">해당 일자에 송장출고 없음</td></tr>';
+    } else {
+        tbody.innerHTML = prods.map(p => `<tr>
+            <td class="small">${escapeHtml(p.product_name)}</td>
+            <td class="text-end small">${fmtN(p.qty)}</td>
+        </tr>`).join('');
+    }
+    const drillArea = document.getElementById('ioDrillArea');
+    drillArea.style.display = '';
+    drillArea.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+document.getElementById('ioFilter').addEventListener('change', renderIOTable);
+
+// 초기 날짜 설정
+(function() {
+    const today = new Date().toISOString().slice(0, 10);
+    const d14 = new Date(Date.now() - 14*86400000).toISOString().slice(0, 10);
+    document.getElementById('ioDateFrom').value = d14;
+    document.getElementById('ioDateTo').value = today;
+})();
+
+document.getElementById('obExportBtn').addEventListener('click', function() {
+    if (!_obItems.length) { alert('먼저 검증을 실행하세요.'); return; }
+    const header = '품목,재고차감(A),송장역산(B),차이(A-B),상태';
+    const rows = _obItems.map(r => {
+        const name = (r.product_name||'').replace(/"/g, '""');
+        return `"${name}",${r.qty_ledger},${r.qty_invoice},${r.diff},${r.status}`;
+    });
+    const csv = '\uFEFF' + header + '\n' + rows.join('\n');
+    const blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const df = document.getElementById('obDateFrom').value;
+    const dt = document.getElementById('obDateTo').value;
+    a.href = url;
+    a.download = `출고검증_${df}_${dt}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+});
+</script>
+{% endblock %}

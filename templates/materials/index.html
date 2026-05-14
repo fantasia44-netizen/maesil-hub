@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+{% block title %}반제품/부재료 관리 — 통합시스템{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-box-seam"></i> 반제품/부재료 관리 <small class="text-muted">(생산부)</small></h4>
+    <button class="btn btn-primary" id="btnAdd"><i class="bi bi-plus-lg"></i> 신규 등록</button>
+  </div>
+
+  <div class="alert alert-info py-2 small">
+    <i class="bi bi-info-circle"></i>
+    수불장 기준 <strong>반제품 · 원료 · 부자재</strong> 관리 페이지입니다.
+    완제품은 <a href="{{ url_for('master.index') }}">상품마스터</a>(영업부)에서 관리합니다.
+  </div>
+
+  <!-- 필터 -->
+  <div class="card mb-3">
+    <div class="card-body py-2">
+      <div class="row g-2 align-items-center">
+        <div class="col-md-3">
+          <label class="form-label small mb-1">분류 필터</label>
+          <select id="fType" class="form-select form-select-sm">
+            <option value="">전체</option>
+            {% for t in material_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label small mb-1">품목명 검색</label>
+          <input type="text" id="fSearch" class="form-control form-control-sm" placeholder="품목명 입력...">
+        </div>
+        <div class="col-md-5 text-end">
+          <span class="text-muted small" id="countInfo">0건</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 테이블 -->
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th style="width:90px">분류</th>
+            <th>품목명</th>
+            <th style="width:110px" class="text-end">현재재고</th>
+            <th style="width:80px">단위</th>
+            <th style="width:90px">보관</th>
+            <th style="width:110px" class="text-end">관리</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="6" class="text-center text-muted py-4">로딩 중...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- 등록/수정 모달 -->
+<div class="modal fade" id="editModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <form id="editForm">
+        <div class="modal-header">
+          <h5 class="modal-title" id="editTitle">품목 등록</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label">분류 <span class="text-danger">*</span></label>
+              <select name="material_type" class="form-select" required>
+                {% for t in material_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+              </select>
+              <div class="form-text">완제품은 <a href="{{ url_for('master.index') }}" target="_blank">상품마스터</a>에서 관리</div>
+            </div>
+            <div class="col-md-8">
+              <label class="form-label">품목명 <span class="text-danger">*</span></label>
+              <input type="text" name="product_name" class="form-control" required>
+              <div class="form-text" id="nameHelp">공백은 자동 제거됩니다.</div>
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">단가 (원)</label>
+              <input type="number" name="cost_price" class="form-control" step="0.01" min="0" value="0">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">기본 단위</label>
+              <input type="text" name="unit" class="form-control" placeholder="예: 개, kg">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">식품유형</label>
+              <select name="food_type" class="form-select">
+                <option value="">(미지정)</option>
+                <option value="농산물">농산물</option>
+                <option value="수산물">수산물</option>
+                <option value="축산물">축산물</option>
+                <option value="공산품">공산품</option>
+              </select>
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">매입 단위</label>
+              <input type="text" name="purchase_unit" class="form-control" placeholder="예: 박스">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">사용 단위</label>
+              <input type="text" name="standard_unit" class="form-control" placeholder="예: g">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">환산 비율 (매입 1 = 사용 ?)</label>
+              <input type="number" name="conversion_ratio" class="form-control" step="0.01" min="0.01" value="1">
+            </div>
+
+            <div class="col-md-4">
+              <label class="form-label">중량</label>
+              <input type="number" name="weight" class="form-control" step="0.01" min="0" value="0">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">중량 단위</label>
+              <select name="weight_unit" class="form-select">
+                <option value="g">g</option>
+                <option value="kg">kg</option>
+                <option value="ml">ml</option>
+                <option value="L">L</option>
+              </select>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label">보관 방법</label>
+              <select name="storage_method" class="form-select">
+                <option value="">(미지정)</option>
+                <option value="냉동">냉동</option>
+                <option value="냉장">냉장</option>
+                <option value="실온">실온</option>
+              </select>
+            </div>
+
+            <div class="col-12">
+              <label class="form-label">비고</label>
+              <input type="text" name="memo" class="form-control">
+            </div>
+          </div>
+          <input type="hidden" name="_is_edit" id="_is_edit" value="0">
+          <input type="hidden" name="_old_name" id="_old_name" value="">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+          <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg"></i> 저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  const LIST_URL = '{{ url_for("materials.api_list") }}';
+  const UPSERT_URL = '{{ url_for("materials.api_upsert") }}';
+  const DELETE_URL = '{{ url_for("materials.api_delete") }}';
+  const RENAME_URL = '{{ url_for("materials.api_rename") }}';
+  const csrf = document.querySelector('meta[name="csrf-token"]').content;
+
+  let allRows = [];
+
+  function escapeHtml(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+  }
+
+  function typeBadge(t){
+    const colors = {'원료':'secondary','부자재':'info','부재료':'info','반제품':'warning'};
+    return `<span class="badge bg-${colors[t]||'secondary'}">${escapeHtml(t)}</span>`;
+  }
+
+  function render(){
+    const fType = document.getElementById('fType').value;
+    const fSearch = document.getElementById('fSearch').value.trim().toLowerCase();
+    const tbody = document.getElementById('tbody');
+
+    const filtered = allRows.filter(r => {
+      if (fType && r.material_type !== fType) return false;
+      if (fSearch && !r.product_name.toLowerCase().includes(fSearch)) return false;
+      return true;
+    });
+
+    document.getElementById('countInfo').textContent = `${filtered.length}건 / 전체 ${allRows.length}건`;
+
+    if (!filtered.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">등록된 품목이 없습니다.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(r => `
+      <tr>
+        <td>${typeBadge(r.material_type)}</td>
+        <td><strong>${escapeHtml(r.product_name)}</strong></td>
+        <td class="text-end">${Number(r.current_stock||0).toLocaleString()}</td>
+        <td>${escapeHtml(r.unit)}</td>
+        <td>${escapeHtml(r.storage_method)}</td>
+        <td class="text-end">
+          <button class="btn btn-sm btn-outline-primary" onclick='openEdit(${JSON.stringify(r)})'><i class="bi bi-pencil"></i></button>
+          <button class="btn btn-sm btn-outline-warning" onclick='openRename(${JSON.stringify(r.product_name)})' title="품목명 변경"><i class="bi bi-arrow-left-right"></i></button>
+          <button class="btn btn-sm btn-outline-danger" onclick='doDelete(${JSON.stringify(r.product_name)})'><i class="bi bi-trash"></i></button>
+        </td>
+      </tr>`).join('');
+  }
+
+  function loadList() {
+    fetch(LIST_URL).then(r => r.json()).then(rows => {
+      allRows = Array.isArray(rows) ? rows : [];
+      render();
+    }).catch(e => {
+      document.getElementById('tbody').innerHTML = `<tr><td colspan="6" class="text-danger text-center py-4">로드 실패: ${e.message}</td></tr>`;
+    });
+  }
+
+  document.getElementById('fType').addEventListener('change', render);
+  document.getElementById('fSearch').addEventListener('input', render);
+
+  document.getElementById('btnAdd').addEventListener('click', () => {
+    document.getElementById('editTitle').textContent = '품목 등록';
+    document.getElementById('editForm').reset();
+    document.getElementById('_is_edit').value = '0';
+    document.getElementById('_old_name').value = '';
+    document.querySelector('#editForm [name="product_name"]').readOnly = false;
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editModal')).show();
+  });
+
+  window.openEdit = function(r) {
+    document.getElementById('editTitle').textContent = '품목 수정';
+    const form = document.getElementById('editForm');
+    form.reset();
+    form.material_type.value = r.material_type || '';
+    form.product_name.value = r.product_name || '';
+    form.product_name.readOnly = true;
+    form.cost_price.value = r.cost_price || 0;
+    form.unit.value = r.unit || '';
+    form.food_type.value = r.food_type || '';
+    form.purchase_unit.value = r.purchase_unit || '';
+    form.standard_unit.value = r.standard_unit || '';
+    form.conversion_ratio.value = r.conversion_ratio || 1;
+    form.weight.value = r.weight || 0;
+    form.weight_unit.value = r.weight_unit || 'g';
+    form.storage_method.value = r.storage_method || '';
+    form.memo.value = r.memo || '';
+    document.getElementById('_is_edit').value = '1';
+    document.getElementById('_old_name').value = r.product_name || '';
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('editModal')).show();
+  };
+
+  window.openRename = function(oldName) {
+    const newName = prompt(`품목명을 변경합니다.\n기존: ${oldName}\n신규 품목명을 입력하세요:`, oldName);
+    if (!newName || newName === oldName) return;
+    if (!confirm(`"${oldName}" → "${newName}"\n\n기존 생산/입고 이력의 품목명은 자동 변경되지 않습니다.\n필요 시 생산관리 등 개별 페이지에서 정정해야 합니다.\n\n계속하시겠습니까?`)) return;
+
+    fetch(RENAME_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json', 'X-CSRFToken': csrf},
+      body: JSON.stringify({old_name: oldName, new_name: newName}),
+    }).then(r => r.json()).then(d => {
+      if (d.success) { alert(d.message || '변경 완료'); loadList(); }
+      else alert('오류: ' + (d.error || '알 수 없는 오류'));
+    }).catch(e => alert('네트워크 오류: ' + e.message));
+  };
+
+  window.doDelete = function(name) {
+    if (!confirm(`"${name}" 품목을 삭제하시겠습니까?\n(기존 재고/이력은 유지됨)`)) return;
+    fetch(DELETE_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json', 'X-CSRFToken': csrf},
+      body: JSON.stringify({product_name: name}),
+    }).then(r => r.json()).then(d => {
+      if (d.success) loadList();
+      else alert('오류: ' + (d.error || '알 수 없는 오류'));
+    }).catch(e => alert('네트워크 오류: ' + e.message));
+  };
+
+  document.getElementById('editForm').addEventListener('submit', function(e){
+    e.preventDefault();
+    const form = e.target;
+    const payload = {
+      product_name: form.product_name.value.trim(),
+      material_type: form.material_type.value,
+      cost_price: parseFloat(form.cost_price.value || 0),
+      unit: form.unit.value.trim(),
+      purchase_unit: form.purchase_unit.value.trim(),
+      standard_unit: form.standard_unit.value.trim(),
+      conversion_ratio: parseFloat(form.conversion_ratio.value || 1),
+      weight: parseFloat(form.weight.value || 0),
+      weight_unit: form.weight_unit.value,
+      food_type: form.food_type.value,
+      storage_method: form.storage_method.value,
+      memo: form.memo.value.trim(),
+    };
+
+    fetch(UPSERT_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json', 'X-CSRFToken': csrf},
+      body: JSON.stringify(payload),
+    }).then(r => r.json()).then(d => {
+      if (d.success) {
+        bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
+        loadList();
+      } else {
+        alert('오류: ' + (d.error || '알 수 없는 오류'));
+      }
+    }).catch(e => alert('네트워크 오류: ' + e.message));
+  });
+
+  loadList();
+})();
+</script>
+{% endblock %}

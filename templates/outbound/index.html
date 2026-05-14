@@ -1,0 +1,718 @@
+{% extends "base.html" %}
+{% block title %}거래처주문처리 - 배마마 통합시스템{% endblock %}
+{% block page_title %}거래처주문처리{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+    <!-- 단건 출고 (폼 기반) -->
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-truck"></i> 단건 출고
+            </div>
+            <div class="card-body">
+                <form id="singleForm" method="POST" action="{{ url_for('outbound.single') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="items" id="itemsInput">
+                    <input type="hidden" name="extra_costs" id="extraCostsInput" value="[]">
+                    <input type="hidden" name="_form_nonce" id="formNonce" value="{{ form_nonce }}">
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">기준일</label>
+                            <input type="date" name="date" class="form-control" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">창고</label>
+                            <select name="location" id="locationSelect" class="form-select" required>
+                                <option value="">선택</option>
+                                {% for loc in locations|default([]) %}
+                                <option value="{{ loc }}">{{ loc }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">매출처</label>
+                            <select name="partner_name" class="form-select" required>
+                                <option value="">선택</option>
+                                {% for p in partners|default([]) %}
+                                <option value="{{ p.partner_name }}">{{ p.partner_name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">본사 (거래명세서용)</label>
+                        <select name="my_biz_id" class="form-select">
+                            {% for b in my_businesses|default([]) %}
+                            <option value="{{ b.id }}" {% if b.is_default %}selected{% endif %}>
+                                {{ b.business_name }}{% if b.is_default %} (기본){% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <!-- 품목 테이블 -->
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered align-middle" id="itemTable">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:35%">품목</th>
+                                    <th style="width:12%">재고</th>
+                                    <th style="width:12%">수량</th>
+                                    <th style="width:15%">단가</th>
+                                    <th style="width:18%">금액</th>
+                                    <th style="width:8%"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="itemBody">
+                                <!-- 동적 행 추가 -->
+                            </tbody>
+                            <tfoot>
+                                <tr class="table-light fw-bold">
+                                    <td colspan="4" class="text-end">합계</td>
+                                    <td id="totalAmount">0</td>
+                                    <td></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+
+                    <!-- 부대비용 섹션 -->
+                    <div class="mt-3 mb-3">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="fw-semibold small"><i class="bi bi-receipt"></i> 부대비용 (재고 차감 없음)</label>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="addExtraCostBtn">
+                                <i class="bi bi-plus"></i> 추가
+                            </button>
+                        </div>
+                        <table class="table table-sm table-bordered" id="extraCostTable" style="display:none;">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width:35%">항목명</th>
+                                    <th style="width:20%">금액</th>
+                                    <th style="width:35%">비고</th>
+                                    <th style="width:10%"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="extraCostBody"></tbody>
+                            <tfoot>
+                                <tr class="table-light">
+                                    <td class="fw-semibold text-end">부대비용 소계</td>
+                                    <td id="extraCostSubtotal" class="fw-semibold text-end">0</td>
+                                    <td colspan="2"></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+
+                    <!-- 총 합계 -->
+                    <div class="alert alert-light border py-2 mb-3 d-flex justify-content-between align-items-center" id="grandTotalBar" style="display:none !important;">
+                        <span class="fw-bold">총 합계 (상품 + 부대비용)</span>
+                        <span class="fw-bold text-primary fs-5" id="grandTotal">0</span>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-secondary" id="addRowBtn" disabled>
+                            <i class="bi bi-plus-circle"></i> 품목 추가
+                        </button>
+                        <button type="submit" class="btn btn-primary ms-auto">
+                            <i class="bi bi-check-circle"></i> 출고 처리
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 일괄 출고 -->
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-files"></i> 일괄 출고
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('outbound.batch') }}" enctype="multipart/form-data">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">기준일</label>
+                        <input type="date" name="date" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">입력 모드</label>
+                        <select name="mode" class="form-select">
+                            <option value="신규입력">신규입력</option>
+                            <option value="수정입력">수정입력 (해당일 출고 삭제 후 재입력)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">엑셀 파일 (복수 선택 가능)</label>
+                        <input type="file" name="files" class="form-control" accept=".xlsx,.xls" multiple required>
+                        <div class="form-text">여러 출고 엑셀 파일을 한번에 업로드하세요.</div>
+                    </div>
+                    <button type="submit" class="btn btn-warning w-100">
+                        <i class="bi bi-upload"></i> 일괄 출고 처리
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 거래 내역 조회 -->
+<div class="card mt-4">
+    <div class="card-header">
+        <i class="bi bi-list-ul"></i> 거래 내역 조회
+    </div>
+    <div class="card-body">
+        <!-- 필터 -->
+        <form method="GET" action="{{ url_for('outbound.index') }}" class="row g-2 align-items-end mb-3">
+            <div class="col-md-2">
+                <label class="form-label fw-semibold small">시작일</label>
+                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from|default('') }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label fw-semibold small">종료일</label>
+                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to|default('') }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold small">거래처</label>
+                <select name="partner_filter" class="form-select form-select-sm">
+                    <option value="전체">전체</option>
+                    {% for p in partners|default([]) %}
+                    <option value="{{ p.partner_name }}" {{ 'selected' if partner_filter == p.partner_name else '' }}>
+                        {{ p.partner_name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label fw-semibold small">품목명</label>
+                <input type="text" name="keyword" class="form-control form-control-sm"
+                       placeholder="품목명 검색 (예: 전복)" value="{{ keyword|default('') }}">
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-sm btn-primary w-100">
+                    <i class="bi bi-search"></i> 조회
+                </button>
+            </div>
+        </form>
+
+        {% if trades|default([])|length > 0 %}
+        <!-- 선택 거래명세서 출력 폼 -->
+        <form id="invoiceSelectedForm" method="POST" action="{{ url_for('outbound.invoice_selected') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <div>
+                    <input type="checkbox" id="checkAllTrades" class="form-check-input me-1">
+                    <label for="checkAllTrades" class="form-check-label small">전체선택</label>
+                    <span id="selectedCount" class="badge bg-secondary ms-2">0건 선택</span>
+                </div>
+                <button type="submit" class="btn btn-sm btn-outline-primary" id="invoiceSelectedBtn" disabled>
+                    <i class="bi bi-file-earmark-pdf"></i> 선택항목 거래명세서
+                </button>
+            </div>
+        </form>
+        {% endif %}
+
+        <!-- 거래 테이블 -->
+        <div class="table-responsive" style="max-height:500px; overflow-y:auto;">
+            <table class="table table-hover table-sm mb-0">
+                <thead class="table-light">
+                    <tr>
+                        {% if trades|default([])|length > 0 %}
+                        <th style="width:35px" class="text-center"></th>
+                        {% endif %}
+                        <th>거래일</th>
+                        <th>거래처</th>
+                        <th>품목명</th>
+                        <th class="text-end">수량</th>
+                        <th class="text-end">단가</th>
+                        <th class="text-end">금액</th>
+                        <th>비고</th>
+                        <th style="width:100px">관리</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in trades|default([]) %}
+                    <tr class="{{ 'table-light' if t._source == 'sales_out' else '' }}">
+                        <td class="text-center">
+                            {% if t._source == 'manual' %}
+                            <input type="checkbox" class="form-check-input trade-check"
+                                   name="selected_trades" value="{{ t.id }}" form="invoiceSelectedForm">
+                            {% else %}
+                            <span class="badge bg-secondary" style="font-size:0.65rem;">주문</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ t.trade_date|default(t.date|default('-')) }}</td>
+                        <td>{{ t.partner_name|default('-') }}</td>
+                        <td>{{ t.product_name }}</td>
+                        <td class="text-end">{{ t.qty|fmt_qty }}</td>
+                        <td class="text-end">{{ '{:,.0f}'.format(t.unit_price|default(0)) if t._source == 'manual' else '-' }}</td>
+                        <td class="text-end fw-bold">{{ '{:,.0f}'.format(t.amount|default(0)) if t._source == 'manual' else '-' }}</td>
+                        <td><small class="text-muted">{{ t.memo|default('') }}</small></td>
+                        <td>
+                            {% if t._source == 'manual' %}
+                            <a href="{{ url_for('outbound.invoice_trade', trade_id=t.id) }}"
+                               class="btn btn-sm btn-outline-primary py-0 px-1" title="거래명세서">
+                                <i class="bi bi-file-earmark-pdf"></i>
+                            </a>
+                            <button type="button" class="btn btn-sm btn-outline-warning py-0 px-1 edit-trade-btn" title="수정"
+                                    data-id="{{ t.id }}"
+                                    data-partner="{{ t.partner_name|default('') }}"
+                                    data-product="{{ t.product_name|default('') }}"
+                                    data-qty="{{ t.qty|default(0) }}"
+                                    data-price="{{ t.unit_price|default(0) }}"
+                                    data-memo="{{ t.memo|default('') }}"
+                                    data-date="{{ t.trade_date|default(t.date|default('')) }}">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            {% else %}
+                            <small class="text-muted">-</small>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center text-muted py-4">
+                            {% if date_from or date_to or (partner_filter and partner_filter != '전체') %}
+                            해당 조건의 거래 내역이 없습니다.
+                            {% else %}
+                            날짜를 입력하고 조회하세요.
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if trades|default([])|length > 0 %}
+                <tfoot class="table-light">
+                    <tr>
+                        <td></td>
+                        <td colspan="5" class="text-end fw-bold">합계</td>
+                        <td class="text-end fw-bold text-primary">
+                            {{ '{:,.0f}'.format(trades|map(attribute='amount')|select('number')|sum) }}
+                        </td>
+                        <td colspan="2"></td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+
+    </div>
+</div>
+
+<!-- 거래 수정 모달 -->
+<div class="modal fade" id="editTradeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="editTradeForm" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title"><i class="bi bi-pencil"></i> 거래 수정</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">거래처</label>
+                        <input type="text" class="form-control form-control-sm" id="editPartner" readonly>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">품목명</label>
+                        <input type="text" class="form-control form-control-sm" id="editProduct" readonly>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">거래일</label>
+                        <input type="text" class="form-control form-control-sm" id="editDate" readonly>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold">수량</label>
+                            <input type="number" name="qty" class="form-control" id="editQty" min="1" required>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold">단가</label>
+                            <input type="number" name="unit_price" class="form-control" id="editPrice" min="0" required>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">금액</label>
+                        <div class="form-control form-control-sm bg-light" id="editAmount">0</div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">비고</label>
+                        <input type="text" name="memo" class="form-control form-control-sm" id="editMemo">
+                    </div>
+                </div>
+                <div class="modal-footer py-1">
+                    <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">취소</button>
+                    <button type="submit" class="btn btn-sm btn-primary">
+                        <i class="bi bi-check-lg"></i> 수정 저장
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function() {
+    let products = [];
+    const locationSelect = document.getElementById('locationSelect');
+    const addRowBtn = document.getElementById('addRowBtn');
+    const itemBody = document.getElementById('itemBody');
+    const singleForm = document.getElementById('singleForm');
+    const itemsInput = document.getElementById('itemsInput');
+    const totalAmountEl = document.getElementById('totalAmount');
+
+    // 창고 선택 시 품목 로드
+    locationSelect.addEventListener('change', async function() {
+        const loc = this.value;
+        itemBody.innerHTML = '';
+        products = [];
+        updateTotal();
+
+        if (!loc) {
+            addRowBtn.disabled = true;
+            return;
+        }
+
+        try {
+            const res = await fetch(`{{ url_for('outbound.api_products') }}?location=${encodeURIComponent(loc)}`);
+            products = await res.json();
+            addRowBtn.disabled = false;
+            addRow();
+        } catch (e) {
+            console.error(e);
+            addRowBtn.disabled = true;
+        }
+    });
+
+    // 행 추가
+    addRowBtn.addEventListener('click', () => addRow());
+
+    // 자동완성 바인딩
+    function bindProductAutocomplete(input, tr) {
+        const listEl = input.nextElementSibling;
+
+        input.addEventListener('input', function() {
+            const q = this.value.trim().toLowerCase();
+            listEl.innerHTML = '';
+            if (!q || products.length === 0) { listEl.style.display = 'none'; return; }
+
+            const matches = products.filter(p => p.name.toLowerCase().includes(q)).slice(0, 15);
+            if (matches.length === 0) { listEl.style.display = 'none'; return; }
+
+            matches.forEach(p => {
+                const item = document.createElement('a');
+                item.href = '#';
+                item.className = 'list-group-item list-group-item-action py-1 px-2 small';
+                item.innerHTML = `<strong>${p.name}</strong> <span class="text-muted">(재고: ${p.qty} ${p.unit})</span>`;
+                item.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    input.value = p.name;
+                    input.dataset.unit = p.unit;
+                    tr.querySelector('.stock-qty').textContent = `${p.qty}${p.unit}`;
+                    listEl.style.display = 'none';
+                    // 제조일자 select 채우기 (DB 재고 기반 자동세팅)
+                    const mfgSel = tr.querySelector('.mfg-select');
+                    if (mfgSel) {
+                        const datedBatches = (p.batches || []).filter(b => b.manufacture_date);
+                        mfgSel.innerHTML = '';
+                        if (datedBatches.length === 0) {
+                            // 제조일 없음 → FIFO만
+                            mfgSel.innerHTML = '<option value="">FIFO</option>';
+                        } else if (datedBatches.length === 1) {
+                            // 제조일 1개 → 자동 선택
+                            const b = datedBatches[0];
+                            const opt = document.createElement('option');
+                            opt.value = b.manufacture_date;
+                            opt.textContent = `${b.manufacture_date} — ${b.qty}${p.unit}${b.expiry_date ? ' · 유통' + b.expiry_date : ''}`;
+                            mfgSel.appendChild(opt);
+                        } else {
+                            // 여러 개 → FIFO + 전체 목록 (사용자 선택)
+                            const opt0 = document.createElement('option');
+                            opt0.value = ''; opt0.textContent = 'FIFO (선택안함)';
+                            mfgSel.appendChild(opt0);
+                            datedBatches.forEach(b => {
+                                const opt = document.createElement('option');
+                                opt.value = b.manufacture_date;
+                                opt.textContent = `${b.manufacture_date} — ${b.qty}${p.unit}${b.expiry_date ? ' · 유통' + b.expiry_date : ''}`;
+                                mfgSel.appendChild(opt);
+                            });
+                        }
+                    }
+                    calcRow(tr);
+                });
+                listEl.appendChild(item);
+            });
+            listEl.style.display = 'block';
+        });
+
+        input.addEventListener('blur', function() {
+            setTimeout(() => { listEl.style.display = 'none'; }, 200);
+        });
+
+        input.addEventListener('focus', function() {
+            if (this.value.trim()) this.dispatchEvent(new Event('input'));
+        });
+    }
+
+    function addRow() {
+        const tr = document.createElement('tr');
+
+        tr.innerHTML = `
+            <td>
+                <div class="position-relative">
+                    <input type="text" class="form-control form-control-sm product-input"
+                           placeholder="품목명 (입력하면 자동완성)" required autocomplete="off" data-unit="개">
+                    <div class="autocomplete-list list-group position-absolute w-100"
+                         style="z-index:1000; max-height:200px; overflow-y:auto; display:none;"></div>
+                </div>
+                <select class="form-select form-select-sm mfg-select mt-1">
+                    <option value="">제조일자: 전체 (FIFO)</option>
+                </select>
+            </td>
+            <td class="stock-qty text-center text-muted">-</td>
+            <td><input type="number" class="form-control form-control-sm qty-input" min="0.001" step="any" required></td>
+            <td><input type="number" class="form-control form-control-sm price-input" min="0" value="0"></td>
+            <td class="row-amount text-end">0</td>
+            <td class="text-center">
+                <button type="button" class="btn btn-sm btn-outline-danger remove-row">
+                    <i class="bi bi-x"></i>
+                </button>
+            </td>
+        `;
+
+        itemBody.appendChild(tr);
+
+        // 자동완성 바인딩
+        const productInput = tr.querySelector('.product-input');
+        bindProductAutocomplete(productInput, tr);
+
+        // 수량/단가 변경 시 금액 계산
+        tr.querySelector('.qty-input').addEventListener('input', () => calcRow(tr));
+        tr.querySelector('.price-input').addEventListener('input', () => calcRow(tr));
+
+        // 행 삭제
+        tr.querySelector('.remove-row').addEventListener('click', () => {
+            tr.remove();
+            updateTotal();
+        });
+    }
+
+    function calcRow(tr) {
+        const qty = parseFloat(tr.querySelector('.qty-input').value) || 0;
+        const price = parseInt(tr.querySelector('.price-input').value) || 0;
+        const amount = qty * price;
+        tr.querySelector('.row-amount').textContent = amount.toLocaleString();
+        updateTotal();
+    }
+
+    function updateTotal() {
+        let total = 0;
+        itemBody.querySelectorAll('.row-amount').forEach(el => {
+            total += parseInt(el.textContent.replace(/,/g, '')) || 0;
+        });
+        totalAmountEl.textContent = total.toLocaleString();
+        updateGrandTotal();
+    }
+
+    // ── 부대비용 ──
+    const extraCostBody = document.getElementById('extraCostBody');
+    const extraCostTable = document.getElementById('extraCostTable');
+    const extraCostSubtotal = document.getElementById('extraCostSubtotal');
+    const extraCostsInput = document.getElementById('extraCostsInput');
+    const grandTotalBar = document.getElementById('grandTotalBar');
+    const grandTotalEl = document.getElementById('grandTotal');
+
+    document.getElementById('addExtraCostBtn').addEventListener('click', function() {
+        addExtraCostRow();
+        extraCostTable.style.display = '';
+    });
+
+    function addExtraCostRow() {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="text" class="form-control form-control-sm extra-name" placeholder="예: 물류비, 운송비..."></td>
+            <td><input type="number" class="form-control form-control-sm extra-amount text-end" min="0" value="0"></td>
+            <td><input type="text" class="form-control form-control-sm extra-memo" placeholder="비고"></td>
+            <td class="text-center">
+                <button type="button" class="btn btn-sm btn-outline-danger remove-extra">
+                    <i class="bi bi-x"></i>
+                </button>
+            </td>
+        `;
+        extraCostBody.appendChild(tr);
+        tr.querySelector('.extra-amount').addEventListener('input', updateExtraCostSubtotal);
+        tr.querySelector('.remove-extra').addEventListener('click', function() {
+            tr.remove();
+            updateExtraCostSubtotal();
+            if (extraCostBody.children.length === 0) extraCostTable.style.display = 'none';
+        });
+    }
+
+    function updateExtraCostSubtotal() {
+        let sub = 0;
+        extraCostBody.querySelectorAll('.extra-amount').forEach(el => {
+            sub += parseInt(el.value) || 0;
+        });
+        extraCostSubtotal.textContent = sub.toLocaleString();
+        updateGrandTotal();
+    }
+
+    function updateGrandTotal() {
+        const itemTotal = parseInt(totalAmountEl.textContent.replace(/,/g, '')) || 0;
+        const extraTotal = parseInt(extraCostSubtotal.textContent.replace(/,/g, '')) || 0;
+        if (extraTotal > 0) {
+            grandTotalBar.style.cssText = '';
+            grandTotalEl.textContent = (itemTotal + extraTotal).toLocaleString() + '원';
+        } else {
+            grandTotalBar.style.cssText = 'display:none !important;';
+        }
+    }
+
+    // 폼 제출 시 items JSON 생성 + 중복 제출 방지
+    let isSubmitting = false;
+    singleForm.addEventListener('submit', function(e) {
+        // 이미 제출 중이면 차단
+        if (isSubmitting) {
+            e.preventDefault();
+            alert('처리 중입니다. 잠시 기다려주세요.');
+            return;
+        }
+
+        const rows = itemBody.querySelectorAll('tr');
+        if (rows.length === 0) {
+            e.preventDefault();
+            alert('품목을 추가하세요.');
+            return;
+        }
+
+        const items = [];
+        let valid = true;
+        rows.forEach(tr => {
+            const productInput = tr.querySelector('.product-input');
+            const qtyInput = tr.querySelector('.qty-input');
+            const priceInput = tr.querySelector('.price-input');
+            const product = productInput.value.trim();
+            const qty = parseFloat(qtyInput.value) || 0;
+            const unitPrice = parseInt(priceInput.value) || 0;
+            const unit = productInput.dataset.unit || '개';
+
+            if (!product || qty <= 0) {
+                valid = false;
+                return;
+            }
+            const mfgSel = tr.querySelector('.mfg-select');
+            const mfgDate = mfgSel ? mfgSel.value : '';
+            items.push({
+                product_name: product,
+                qty: qty,
+                unit_price: unitPrice,
+                unit: unit,
+                manufacture_date: mfgDate,
+            });
+        });
+
+        if (!valid) {
+            e.preventDefault();
+            alert('품목과 수량을 모두 입력하세요.');
+            return;
+        }
+
+        itemsInput.value = JSON.stringify(items);
+
+        // 부대비용 수집
+        const extraCosts = [];
+        extraCostBody.querySelectorAll('tr').forEach(tr => {
+            const name = tr.querySelector('.extra-name').value.trim();
+            const amount = parseInt(tr.querySelector('.extra-amount').value) || 0;
+            const memo = tr.querySelector('.extra-memo').value.trim();
+            if (name && amount > 0) {
+                extraCosts.push({ name: name, amount: amount, memo: memo });
+            }
+        });
+        extraCostsInput.value = JSON.stringify(extraCosts);
+
+        // 중복 제출 방지: 버튼 비활성화 + 로딩 표시
+        isSubmitting = true;
+        const submitBtn = singleForm.querySelector('button[type="submit"]');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 처리 중...';
+        }
+    });
+})();
+
+// ── 거래 내역 체크박스 (거래명세서 합산 출력용) ──
+(function() {
+    const checkAll = document.getElementById('checkAllTrades');
+    const tradeChecks = document.querySelectorAll('.trade-check');
+    const selectedCount = document.getElementById('selectedCount');
+    const invoiceBtn = document.getElementById('invoiceSelectedBtn');
+
+    if (!checkAll || tradeChecks.length === 0) return;
+
+    function updateCount() {
+        const checked = document.querySelectorAll('.trade-check:checked');
+        const cnt = checked.length;
+        if (selectedCount) selectedCount.textContent = `${cnt}건 선택`;
+        if (invoiceBtn) invoiceBtn.disabled = cnt === 0;
+    }
+
+    checkAll.addEventListener('change', function() {
+        tradeChecks.forEach(cb => { cb.checked = this.checked; });
+        updateCount();
+    });
+
+    tradeChecks.forEach(cb => {
+        cb.addEventListener('change', function() {
+            checkAll.checked = document.querySelectorAll('.trade-check:checked').length === tradeChecks.length;
+            updateCount();
+        });
+    });
+
+    updateCount();
+})();
+
+// ── 거래 수정 모달 ──
+(function() {
+    const editBtns = document.querySelectorAll('.edit-trade-btn');
+    if (!editBtns.length) return;
+
+    const modal = new bootstrap.Modal(document.getElementById('editTradeModal'));
+    const form = document.getElementById('editTradeForm');
+    const qtyInput = document.getElementById('editQty');
+    const priceInput = document.getElementById('editPrice');
+    const amountEl = document.getElementById('editAmount');
+
+    function calcAmount() {
+        const q = parseInt(qtyInput.value) || 0;
+        const p = parseInt(priceInput.value) || 0;
+        amountEl.textContent = (q * p).toLocaleString() + '원';
+    }
+    qtyInput.addEventListener('input', calcAmount);
+    priceInput.addEventListener('input', calcAmount);
+
+    editBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const id = this.dataset.id;
+            form.action = `/outbound/trades/update/${id}`;
+            document.getElementById('editPartner').value = this.dataset.partner;
+            document.getElementById('editProduct').value = this.dataset.product;
+            document.getElementById('editDate').value = this.dataset.date;
+            qtyInput.value = this.dataset.qty;
+            priceInput.value = this.dataset.price;
+            document.getElementById('editMemo').value = this.dataset.memo;
+            calcAmount();
+            modal.show();
+        });
+    });
+})();
+</script>
+{% endblock %}

@@ -32,6 +32,15 @@ def create_app():
     from config import Config
     app.config.from_object(Config)
 
+    # ─── 멀티테넌트 가드 ───
+    # SupabaseDB 모든 메서드에 biz_id=g.biz_id 자동 주입.
+    # 레거시 blueprints에서 biz_id 누락해도 사업자 격리 보장.
+    try:
+        from db.tenant import install_tenant_guard
+        install_tenant_guard()
+    except Exception as e:
+        logging.warning(f'tenant_guard install failed: {e}')
+
     # ─── Logging ───
     logging.basicConfig(
         level=logging.INFO,

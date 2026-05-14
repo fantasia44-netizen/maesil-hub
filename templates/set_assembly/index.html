@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+{% block title %}세트작업 - 배마마 통합시스템{% endblock %}
+{% block page_title %}세트작업{% endblock %}
+
+{% block content %}
+<div class="row g-4">
+    <!-- 세트작업 입력폼 -->
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-header">
+                <i class="bi bi-boxes"></i> 세트작업 실행
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('set_assembly.process') }}" id="setForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">기준일</label>
+                        <input type="date" name="date" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">판매처 (채널)</label>
+                        <select name="channel" id="channelSelect" class="form-select" required>
+                            <option value="">선택</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">세트종류</label>
+                        <select name="set_name" id="setNameSelect" class="form-select" required>
+                            <option value="">채널을 먼저 선택하세요</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">수량</label>
+                        <input type="number" name="qty" class="form-control" value="1" min="1" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">창고위치</label>
+                        <select name="location" id="locationSelect" class="form-select" required>
+                            <option value="">선택</option>
+                            {% for loc in locations|default([]) %}
+                            <option value="{{ loc }}">{{ loc }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">보관방법</label>
+                        <select name="storage_method" class="form-select">
+                            <option value="">자동 (구성품 기준)</option>
+                            <option value="냉동">냉동</option>
+                            <option value="냉장">냉장</option>
+                            <option value="실온">실온</option>
+                        </select>
+                        <div class="form-text text-muted small">미선택 시 구성품 중 가장 엄격한 보관방법 자동 적용</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">식품유형</label>
+                        <select name="food_type" class="form-select">
+                            <option value="">미지정</option>
+                            <option value="농산물">농산물</option>
+                            <option value="수산물">수산물</option>
+                            <option value="축산물">축산물</option>
+                        </select>
+                    </div>
+
+                    <!-- 부재료 입력 -->
+                    <hr>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <label class="form-label fw-semibold mb-0">
+                            <i class="bi bi-box-seam"></i> 부재료 (선택)
+                        </label>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addSubMaterialRow()">
+                            <i class="bi bi-plus-lg"></i> 부재료 추가
+                        </button>
+                    </div>
+                    <div class="alert alert-info small py-1 px-2 mb-2">
+                        <i class="bi bi-info-circle"></i>
+                        세트 포장 시 사용되는 부재료 (박스, 아이스팩 등)를 입력하면 재고에서 자동 차감됩니다.
+                    </div>
+                    <div id="subMaterialRows">
+                        <!-- JS로 동적 추가 -->
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100 mt-2"
+                            onclick="return confirm('세트작업을 실행하시겠습니까?\n단품 재고가 차감되고 세트가 생성됩니다.');">
+                        <i class="bi bi-play-fill"></i> 세트작업 실행
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 세트작업 이력 -->
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-clock-history"></i> 세트작업 이력 조회</span>
+                {% if current_user.role != 'admin' %}
+                <button class="edit-mode-toggle view-mode" id="btnEditModeToggle" onclick="toggleEditMode()">🔒 보기모드</button>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                <!-- 이력 조회 폼 -->
+                <form method="GET" action="{{ url_for('set_assembly.index') }}" class="row g-2 align-items-end mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">시작일</label>
+                        <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from|default('') }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold small">종료일</label>
+                        <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to|default('') }}">
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-sm btn-primary">
+                            <i class="bi bi-search"></i> 조회
+                        </button>
+                        {% if history is defined and history %}
+                        <a href="{{ url_for('set_assembly.export', date_from=date_from|default(''), date_to=date_to|default('')) }}"
+                           class="btn btn-sm btn-outline-success">
+                            <i class="bi bi-download"></i> 엑셀
+                        </a>
+                        {% endif %}
+                    </div>
+                </form>
+
+                <!-- 이력 삭제 -->
+                {% if history is defined and history %}
+                <form method="POST" action="{{ url_for('set_assembly.delete') }}" class="row g-2 align-items-end mb-3 set-delete-form"
+                      onsubmit="return confirm('해당 날짜의 세트작업 이력을 삭제하시겠습니까?\n(단품 차감 + 세트 산출 모두 삭제됩니다)');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="col-md-5">
+                        <input type="date" name="delete_date" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="col-md-4">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-trash"></i> 해당일 삭제
+                        </button>
+                    </div>
+                </form>
+                {% endif %}
+
+                <!-- 이력 테이블 -->
+                <div class="table-responsive" style="max-height: 500px; overflow-y: auto;">
+                    <table class="table table-hover table-sm mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>날짜</th>
+                                <th>품목명</th>
+                                <th>유형</th>
+                                <th class="text-end">수량</th>
+                                <th>창고</th>
+                                <th>비고</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in history|default([]) %}
+                            <tr>
+                                <td>{{ row.transaction_date|default('-') }}</td>
+                                <td>{{ row.product_name }}</td>
+                                <td>
+                                    {% set t = row.type|default('') %}
+                                    {% if t == 'SET_OUT' %}
+                                        <span class="badge bg-danger">{{ type_labels.get(t, '세트투입') }}</span>
+                                    {% elif t == 'SET_IN' %}
+                                        <span class="badge bg-success">{{ type_labels.get(t, '세트산출') }}</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">{{ type_labels.get(t, t) }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">{{ row.qty|fmt_qty }}</td>
+                                <td>{{ row.location|default('-') }}</td>
+                                <td class="text-muted small">{{ row.memo|default('-') }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center text-muted py-4">
+                                    {% if date_from or date_to %}
+                                    해당 기간의 세트작업 이력이 없습니다.
+                                    {% else %}
+                                    날짜를 입력하고 조회하세요.
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const isAdmin = {{ 'true' if current_user.role == 'admin' else 'false' }};
+let editMode = isAdmin;
+
+function toggleEditMode() {
+    editMode = !editMode;
+    const btn = document.getElementById('btnEditModeToggle');
+    if(btn){
+        btn.className = editMode ? 'edit-mode-toggle edit-mode' : 'edit-mode-toggle view-mode';
+        btn.innerHTML = editMode ? '✏️ 수정모드' : '🔒 보기모드';
+    }
+    document.querySelectorAll('.set-delete-form').forEach(el => el.style.display = editMode ? '' : 'none');
+}
+document.addEventListener('DOMContentLoaded', function(){
+    document.querySelectorAll('.set-delete-form').forEach(el => el.style.display = editMode ? '' : 'none');
+});
+
+// BOM 데이터 (서버에서 전달)
+const bomData = {{ bom_data_json|safe }};
+
+// 품목 캐시 (부재료 자동완성용)
+let productCache = [];
+
+const channelSelect = document.getElementById('channelSelect');
+const setNameSelect = document.getElementById('setNameSelect');
+const locationSelect = document.getElementById('locationSelect');
+
+// 채널 옵션 동적 생성
+const channels = Object.keys(bomData);
+channels.forEach(ch => {
+    const opt = document.createElement('option');
+    opt.value = ch;
+    opt.textContent = ch;
+    channelSelect.appendChild(opt);
+});
+
+// 채널 변경 시 세트 목록 업데이트
+channelSelect.addEventListener('change', function() {
+    const ch = this.value;
+    setNameSelect.innerHTML = '<option value="">선택</option>';
+
+    if (ch && bomData[ch]) {
+        bomData[ch].forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            setNameSelect.appendChild(opt);
+        });
+    }
+});
+
+// 창고 변경 시 품목 캐시 로드 (부재료 자동완성용)
+locationSelect.addEventListener('change', function() {
+    const loc = this.value;
+    productCache = [];
+    if (!loc) return;
+
+    fetch(`{{ url_for('set_assembly.api_products') }}?location=${encodeURIComponent(loc)}`)
+        .then(r => r.json())
+        .then(data => {
+            if (Array.isArray(data)) productCache = data;
+        })
+        .catch(err => console.error('품목 로드 실패:', err));
+});
+
+// 부재료 자동완성 바인딩
+function bindSubAutocomplete(input) {
+    const listEl = input.nextElementSibling;
+    const stockEl = input.closest('.col-8').querySelector('.sub-stock');
+
+    input.addEventListener('input', function() {
+        const q = this.value.trim().toLowerCase();
+        listEl.innerHTML = '';
+        if (!q || productCache.length === 0) { listEl.style.display = 'none'; return; }
+
+        const matches = productCache.filter(p => p.name.toLowerCase().includes(q)).slice(0, 10);
+        if (matches.length === 0) { listEl.style.display = 'none'; return; }
+
+        matches.forEach(p => {
+            const item = document.createElement('a');
+            item.href = '#';
+            item.className = 'list-group-item list-group-item-action py-1 px-2 small';
+            item.innerHTML = `<strong>${p.name}</strong> <span class="text-muted">(재고: ${p.qty} ${p.unit})</span>`;
+            item.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                input.value = p.name;
+                if (stockEl) stockEl.textContent = `현재고: ${p.qty} ${p.unit}`;
+                listEl.style.display = 'none';
+            });
+            listEl.appendChild(item);
+        });
+        listEl.style.display = 'block';
+    });
+
+    input.addEventListener('blur', function() {
+        setTimeout(() => { listEl.style.display = 'none'; }, 200);
+    });
+
+    input.addEventListener('focus', function() {
+        if (this.value.trim()) this.dispatchEvent(new Event('input'));
+    });
+}
+
+function addSubMaterialRow() {
+    const container = document.getElementById('subMaterialRows');
+    const html = `
+    <div class="sub-material-row border rounded p-2 mb-2">
+        <div class="row g-2">
+            <div class="col-8">
+                <div class="position-relative">
+                    <input type="text" name="sub_material_name[]" class="form-control form-control-sm sub-input"
+                           placeholder="부재료명 (입력하면 자동완성)" autocomplete="off">
+                    <div class="autocomplete-list list-group position-absolute w-100" style="z-index:1000; max-height:200px; overflow-y:auto; display:none;"></div>
+                </div>
+                <small class="text-muted sub-stock"></small>
+            </div>
+            <div class="col-3">
+                <input type="number" name="sub_material_qty[]" class="form-control form-control-sm"
+                       placeholder="수량" min="1">
+            </div>
+            <div class="col-1 text-end">
+                <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeSubRow(this)" title="삭제">
+                    <i class="bi bi-x"></i>
+                </button>
+            </div>
+        </div>
+    </div>`;
+    container.insertAdjacentHTML('beforeend', html);
+
+    const newInput = container.lastElementChild.querySelector('.sub-input');
+    bindSubAutocomplete(newInput);
+}
+
+function removeSubRow(btn) {
+    btn.closest('.sub-material-row').remove();
+}
+</script>
+{% endblock %}

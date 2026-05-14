@@ -37,6 +37,17 @@ def get_current_subscription(biz_id):
         return None
 
 
+def _log_action(action, target=None, detail=None, user_id=None,
+                old_value=None, new_value=None):
+    """레거시 호환 shim — log_audit으로 위임. biz_id는 g.biz_id에서 가져옴."""
+    payload = {'target': target, 'detail': detail}
+    if old_value is not None:
+        payload['old_value'] = old_value
+    if new_value is not None:
+        payload['new_value'] = new_value
+    return log_audit(action, detail=payload, user_id=user_id)
+
+
 def log_audit(action, detail=None, biz_id=None, user_id=None, operator_id=None):
     """audit_logs INSERT (예외 발생해도 silent)."""
     try:

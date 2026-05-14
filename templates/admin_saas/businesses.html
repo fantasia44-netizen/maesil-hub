@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}회원사 목록{% endblock %}
+{% block content %}
+<h3>회원사 목록</h3>
+<form method="get" class="row g-2 mb-3">
+  <div class="col-auto">
+    <input type="text" class="form-control" name="q" value="{{ q }}" placeholder="회사명">
+  </div>
+  <div class="col-auto">
+    <select class="form-select" name="status">
+      <option value="">전체</option>
+      <option value="active" {% if status=='active' %}selected{% endif %}>active</option>
+      <option value="suspended" {% if status=='suspended' %}selected{% endif %}>suspended</option>
+      <option value="trial" {% if status=='trial' %}selected{% endif %}>trial</option>
+    </select>
+  </div>
+  <div class="col-auto"><button class="btn btn-outline-primary">검색</button></div>
+</form>
+
+<table class="table table-sm table-hover">
+  <thead><tr>
+    <th>ID</th><th>이름</th><th>대표</th><th>플랜</th><th>상태</th><th>구독상태</th><th>가입일</th><th>액션</th>
+  </tr></thead>
+  <tbody>
+    {% for b in businesses %}
+    <tr>
+      <td>{{ b.id }}</td>
+      <td>{{ b.name }}</td>
+      <td>{{ b.representative or '-' }}</td>
+      <td>{{ b.plan_name }}</td>
+      <td>
+        {% if b.status == 'active' %}<span class="badge bg-success">{{ b.status }}</span>
+        {% elif b.status == 'suspended' %}<span class="badge bg-danger">{{ b.status }}</span>
+        {% else %}<span class="badge bg-secondary">{{ b.status }}</span>{% endif %}
+      </td>
+      <td>{{ b.subscription_status }}</td>
+      <td>{{ (b.created_at or '')[:10] }}</td>
+      <td>
+        <form method="post" action="{{ url_for('admin_saas.impersonate', biz_id=b.id) }}" class="d-inline">
+          <button class="btn btn-sm btn-outline-warning"
+                  onclick="return confirm('이 회사로 위장 진입?')">위장</button>
+        </form>
+        {% if b.status == 'suspended' %}
+          <form method="post" action="{{ url_for('admin_saas.activate_business', biz_id=b.id) }}" class="d-inline">
+            <button class="btn btn-sm btn-outline-success">복구</button>
+          </form>
+        {% else %}
+          <form method="post" action="{{ url_for('admin_saas.suspend_business', biz_id=b.id) }}" class="d-inline">
+            <input type="hidden" name="reason" value="admin manual">
+            <button class="btn btn-sm btn-outline-danger"
+                    onclick="return confirm('정지하시겠습니까?')">정지</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="text-center text-muted">결과 없음</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}슈퍼어드민 — 매실 허브{% endblock %}
+{% block content %}
+<h3>SaaS 운영 대시보드</h3>
+<div class="row">
+  <div class="col-md-3"><div class="card mb-3"><div class="card-body">
+    <div class="text-muted small">전체 회원사</div>
+    <div class="display-6">{{ summary.businesses_total }}</div>
+    <div class="small">활성 {{ summary.businesses_active }} / 정지 {{ summary.businesses_suspended }}</div>
+  </div></div></div>
+  <div class="col-md-3"><div class="card mb-3"><div class="card-body">
+    <div class="text-muted small">활성 구독</div>
+    <div class="display-6">{{ summary.subs_active }}</div>
+    <div class="small">trial {{ summary.subs_trial }} / past_due {{ summary.subs_past_due }} / cancelled {{ summary.subs_cancelled }}</div>
+  </div></div></div>
+  <div class="col-md-3"><div class="card mb-3"><div class="card-body">
+    <div class="text-muted small">이번달 실수령 MRR</div>
+    <div class="display-6">{{ '{:,}'.format(summary.mrr_this_month) }}<small>원</small></div>
+    <div class="small">결제 {{ summary.paid_count_this_month }}건</div>
+  </div></div></div>
+  <div class="col-md-3"><div class="card mb-3"><div class="card-body">
+    <ul class="list-unstyled mb-0">
+      <li><a href="{{ url_for('admin_saas.businesses_list') }}">→ 회원사 목록</a></li>
+      <li><a href="{{ url_for('admin_saas.payments_list') }}">→ 결제 내역</a></li>
+      <li><a href="{{ url_for('admin_saas.config_list') }}">→ 시스템 설정</a></li>
+    </ul>
+  </div></div></div>
+</div>
+{% endblock %}

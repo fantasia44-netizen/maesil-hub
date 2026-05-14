@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}시스템 설정 (saas_config){% endblock %}
+{% block content %}
+<h3>시스템 설정</h3>
+<p class="text-muted">민감 키는 Fernet 암호화. <code>FERNET_KEY</code> env 미설정 시 평문으로 저장됩니다.</p>
+
+{% for cat, rows in groups.items() %}
+<h5 class="mt-4">{{ cat }}</h5>
+<table class="table table-sm table-bordered align-middle">
+  <thead><tr>
+    <th>키</th><th>설명</th><th>현재값</th><th>새 값</th><th></th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td><code>{{ r.key }}</code></td>
+      <td class="small">{{ r.description or '-' }}</td>
+      <td>
+        {% if r.value_encrypted %}<span class="badge bg-secondary">{{ r.value_encrypted }}</span>
+        {% elif r.value_plain %}{{ r.value_plain }}
+        {% else %}<span class="text-muted">(미설정)</span>{% endif %}
+      </td>
+      <td>
+        <form method="post" action="{{ url_for('admin_saas.config_save') }}" class="d-flex gap-1">
+          <input type="hidden" name="key" value="{{ r.key }}">
+          <input type="hidden" name="category" value="{{ cat }}">
+          <input type="hidden" name="description" value="{{ r.description or '' }}">
+          <input type="hidden" name="encrypted" value="{{ '1' if r.key in secret_keys else '0' }}">
+          <input type="text" name="value" class="form-control form-control-sm"
+                 placeholder="{% if r.key in secret_keys %}새 시크릿 입력{% else %}새 값{% endif %}">
+          <button class="btn btn-sm btn-success">저장</button>
+        </form>
+      </td>
+      <td>
+        <form method="post" action="{{ url_for('admin_saas.config_delete') }}" class="d-inline">
+          <input type="hidden" name="key" value="{{ r.key }}">
+          <button class="btn btn-sm btn-outline-danger"
+                  onclick="return confirm('{{ r.key }} 삭제?')">삭제</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}구독 / 결제 — 매실 허브{% endblock %}
+{% block content %}
+<div class="row">
+  <div class="col-md-4">
+    <div class="card mb-3">
+      <div class="card-header"><strong>현재 구독</strong></div>
+      <div class="card-body">
+        <p><strong>회사:</strong> {{ biz.name }}</p>
+        <p><strong>플랜:</strong> {{ current_plan.name or '-' }}</p>
+        <p><strong>상태:</strong> {{ subscription.status or 'trial' }}</p>
+        <p><strong>다음 결제일:</strong> {{ subscription.current_period_end[:10] if subscription.current_period_end else '-' }}</p>
+        <p><strong>자동갱신:</strong> {{ '예' if subscription.auto_renewal else '아니요' }}</p>
+        {% if subscription.card_info %}
+          <p><strong>결제수단:</strong>
+            {% if subscription.card_info.pg == 'kakaopay' %}카카오페이
+            {% else %}{{ subscription.card_info.brand }} *{{ subscription.card_info.last4 }}{% endif %}
+          </p>
+        {% endif %}
+        <a href="{{ url_for('billing.billing_history') }}" class="btn btn-sm btn-outline-secondary">결제 내역</a>
+        {% if subscription.portone_billing_key %}
+          <button class="btn btn-sm btn-outline-danger" onclick="deleteBillingKey()">결제수단 해제</button>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-8">
+    <div class="card mb-3">
+      <div class="card-header"><strong>플랜 선택</strong></div>
+      <div class="card-body">
+        <div class="row">
+          {% for p in plans %}
+          <div class="col-md-4">
+            <div class="card h-100">
+              <div class="card-body">
+                <h5>{{ p.name }}</h5>
+                <p class="display-6">{{ '{:,}'.format(p.monthly_price) }}원<small>/월</small></p>
+                <ul class="small text-muted">
+                  {% set f = p.features or {} %}
+                  <li>채널 {{ f.channels if f.channels|default(0) >= 0 else '무제한' }}</li>
+                  <li>사용자 {{ f.users if f.users|default(0) >= 0 else '무제한' }}</li>
+                  <li>저장공간 {{ f.storage_gb }}GB</li>
+                </ul>
+                <button class="btn btn-success w-100"
+                        onclick="subscribePlan('{{ p.code }}', {{ p.monthly_price }})">
+                  {% if current_plan.code == p.code %}현재 플랜{% else %}변경{% endif %}
+                </button>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.portone.io/v2/browser-sdk.js"></script>
+<script>
+const STORE_ID = "{{ portone_store_id }}";
+const CHANNEL_CARD = "{{ portone_channel_card }}";
+const HAS_CARD = {{ 'true' if subscription.portone_billing_key else 'false' }};
+
+async function ensureBillingKey() {
+  if (HAS_CARD) return true;
+  if (!STORE_ID || !CHANNEL_CARD) {
+    alert('포트원 설정이 누락되어 있습니다. 어드민에 문의하세요.');
+    return false;
+  }
+  const res = await PortOne.requestIssueBillingKey({
+    storeId: STORE_ID,
+    channelKey: CHANNEL_CARD,
+    billingKeyMethod: 'CARD',
+    issueId: 'bk_' + Date.now(),
+    issueName: '매실 허브 정기결제 카드 등록',
+  });
+  if (res.code) { alert('카드 등록 실패: ' + res.message); return false; }
+  const r = await fetch('{{ url_for("billing.save_billing_key") }}', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({billing_key: res.billingKey, pg: 'card'}),
+  });
+  const j = await r.json();
+  return j.status === 'ok';
+}
+
+async function subscribePlan(code, price) {
+  if (price > 0) {
+    const ok = await ensureBillingKey();
+    if (!ok) return;
+  }
+  if (!confirm(`${code} 플랜으로 변경하시겠습니까? (${price.toLocaleString()}원 결제)`)) return;
+  const r = await fetch('{{ url_for("billing.subscribe") }}', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({plan_code: code}),
+  });
+  const j = await r.json();
+  if (j.status === 'ok') {
+    alert('결제 완료! 다음 결제일: ' + (j.period_end || '').slice(0, 10));
+    location.reload();
+  } else {
+    alert('실패: ' + (j.message || ''));
+  }
+}
+
+async function deleteBillingKey() {
+  if (!confirm('결제수단을 해제하시겠습니까? 자동갱신이 중지됩니다.')) return;
+  const r = await fetch('{{ url_for("billing.delete_billing_key_route") }}', {method: 'POST'});
+  const j = await r.json();
+  if (j.status === 'ok') { alert('해제 완료'); location.reload(); }
+  else alert('실패');
+}
+</script>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}온보딩 — 회사 정보{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-md-7">
+  <p class="text-muted">단계 {{ step }}/{{ total }}</p>
+  <h3>회사 정보 확인</h3>
+  <form method="post">
+    <div class="mb-2"><label>회사명</label>
+      <input type="text" class="form-control" name="name" value="{{ biz.name or '' }}" required></div>
+    <div class="mb-2"><label>사업자번호</label>
+      <input type="text" class="form-control" name="biz_reg_no" value="{{ biz.biz_reg_no or '' }}"></div>
+    <div class="mb-2"><label>대표자</label>
+      <input type="text" class="form-control" name="representative" value="{{ biz.representative or '' }}"></div>
+    <div class="mb-2"><label>주소</label>
+      <input type="text" class="form-control" name="address" value="{{ biz.address or '' }}"></div>
+    <div class="mb-3"><label>업종</label>
+      <select class="form-select" name="industry">
+        <option value="food" {% if biz.industry=='food' %}selected{% endif %}>식품</option>
+        <option value="livestock" {% if biz.industry=='livestock' %}selected{% endif %}>축산</option>
+        <option value="other" {% if biz.industry=='other' %}selected{% endif %}>기타</option>
+      </select>
+    </div>
+    <button class="btn btn-success">다음 →</button>
+    <a href="{{ url_for('onboarding.skip_all') }}" class="btn btn-link">건너뛰기</a>
+  </form>
+</div></div>
+{% endblock %}

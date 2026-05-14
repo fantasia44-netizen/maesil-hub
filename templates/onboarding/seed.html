@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}온보딩 — 시작하기{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-md-6">
+  <p class="text-muted">단계 {{ step }}/{{ total }}</p>
+  <h3>시작하기</h3>
+  <p>샘플 데이터를 불러오시겠습니까? (선택사항)</p>
+  <form method="post" class="d-flex gap-2">
+    <button class="btn btn-success" name="action" value="load">샘플 데이터 불러오기</button>
+    <button class="btn btn-outline-secondary" name="action" value="skip">건너뛰고 시작</button>
+  </form>
+</div></div>
+{% endblock %}

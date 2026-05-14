@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}결제 내역 — 매실 허브{% endblock %}
+{% block content %}
+<h3>결제 내역</h3>
+<p><a href="{{ url_for('billing.billing_home') }}" class="btn btn-sm btn-outline-secondary">구독 관리로</a></p>
+
+<table class="table table-sm table-striped">
+  <thead><tr>
+    <th>일시</th><th>주문명</th><th>금액(VAT포함)</th><th>공급가</th><th>VAT</th>
+    <th>상태</th><th>환불</th><th>영수증</th>
+  </tr></thead>
+  <tbody>
+    {% for p in payments %}
+    <tr>
+      <td>{{ (p.paid_at or p.created_at or '')[:19] }}</td>
+      <td>{{ p.order_name or '-' }}</td>
+      <td class="text-end">{{ '{:,}'.format(p.amount or 0) }}</td>
+      <td class="text-end">{{ '{:,}'.format(p.supply_amount or 0) }}</td>
+      <td class="text-end">{{ '{:,}'.format(p.vat_amount or 0) }}</td>
+      <td>
+        {% if p.status == 'paid' %}<span class="badge bg-success">결제완료</span>
+        {% elif p.status == 'failed' %}<span class="badge bg-danger">실패</span>
+        {% else %}{{ p.status }}{% endif %}
+      </td>
+      <td>
+        {% if p.refund_status == 'completed' %}
+          <span class="text-danger">환불 {{ '{:,}'.format(p.refund_amount or 0) }}원</span>
+        {% elif p.refund_status == 'requested' %}
+          <span class="badge bg-warning text-dark">환불검토중</span>
+        {% elif p.status == 'paid' %}
+          <button class="btn btn-sm btn-outline-danger"
+                  onclick="reqRefund('{{ p.portone_payment_id }}', {{ p.amount or 0 }})">환불 요청</button>
+        {% endif %}
+      </td>
+      <td>
+        {% if p.receipt_url %}<a href="{{ p.receipt_url }}" target="_blank">보기</a>{% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="text-center text-muted">결제 내역 없음</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<script>
+async function reqRefund(pid, amt) {
+  const reason = prompt('환불 사유를 입력하세요 (10자 이상):');
+  if (!reason || reason.length < 10) return alert('사유가 너무 짧습니다.');
+  const r = await fetch('{{ url_for("billing.refund") }}', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({payment_id: pid, reason: reason}),
+  });
+  const j = await r.json();
+  if (j.status === 'ok') {
+    alert(j.auto ? '자동 환불 완료' : '환불 요청 접수 (검토 후 처리)');
+    location.reload();
+  } else alert('실패: ' + (j.message || ''));
+}
+</script>
+{% endblock %}

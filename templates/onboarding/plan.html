@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}온보딩 — 플랜 선택{% endblock %}
+{% block content %}
+<p class="text-muted">단계 {{ step }}/{{ total }}</p>
+<h3>플랜 선택</h3>
+<form method="post">
+  <div class="row">
+    {% for p in plans %}
+    <div class="col-md-4">
+      <div class="card h-100">
+        <div class="card-body">
+          <h5>{{ p.name }}</h5>
+          <p class="display-6">{{ '{:,}'.format(p.monthly_price) }}<small>원/월</small></p>
+          <ul class="small text-muted">
+            {% set f = p.features or {} %}
+            <li>채널 {{ f.channels if f.channels|default(0) >= 0 else '무제한' }}</li>
+            <li>사용자 {{ f.users if f.users|default(0) >= 0 else '무제한' }}</li>
+          </ul>
+          <button type="submit" name="plan_code" value="{{ p.code }}"
+                  class="btn btn-outline-success w-100">선택</button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</form>
+<p class="mt-3"><a href="{{ url_for('onboarding.skip_all') }}" class="btn btn-link">나중에 선택</a></p>
+{% endblock %}

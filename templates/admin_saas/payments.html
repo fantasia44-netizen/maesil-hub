@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}결제 내역(전체){% endblock %}
+{% block content %}
+<h3>결제 내역 (전사)</h3>
+<form method="get" class="row g-2 mb-3">
+  <div class="col-auto">
+    <input type="number" class="form-control" name="biz_id" value="{{ biz_id or '' }}" placeholder="biz_id">
+  </div>
+  <div class="col-auto"><button class="btn btn-outline-primary">필터</button></div>
+</form>
+
+<table class="table table-sm table-striped">
+  <thead><tr>
+    <th>일시</th><th>biz</th><th>주문</th><th>금액</th><th>상태</th><th>환불</th><th>PG</th>
+  </tr></thead>
+  <tbody>
+    {% for p in payments %}
+    <tr>
+      <td>{{ (p.paid_at or p.created_at or '')[:19] }}</td>
+      <td>{{ p.biz_id }}</td>
+      <td>{{ p.order_name or '-' }}</td>
+      <td class="text-end">{{ '{:,}'.format(p.amount or 0) }}</td>
+      <td>{{ p.status }}</td>
+      <td>{{ p.refund_status or '-' }}</td>
+      <td>{{ p.pg_provider or '-' }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

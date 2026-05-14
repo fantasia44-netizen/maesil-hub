@@ -80,6 +80,14 @@ def create_app():
 
     app.register_blueprint(main_bp)
 
+    # ─── ERP/WMS Blueprints (40개 일괄 등록) ───
+    try:
+        from blueprints import register_all as register_erp_blueprints
+        registered, failed = register_erp_blueprints(app)
+        logging.info(f'ERP blueprints: {len(registered)} registered, {len(failed)} failed')
+    except Exception as e:
+        logging.warning(f'ERP blueprints registration failed: {e}')
+
     # ─── Health check (매실에이전시용) ───
     @app.route('/health')
     def health():

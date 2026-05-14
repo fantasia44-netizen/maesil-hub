@@ -12,7 +12,7 @@ from services.dashboard_service import (
 )
 from db_utils import get_db
 
-dashboard_bp = Blueprint('main', __name__)
+dashboard_bp = Blueprint('legacy_dashboard', __name__, url_prefix='/legacy-dashboard')
 
 
 @dashboard_bp.route('/')

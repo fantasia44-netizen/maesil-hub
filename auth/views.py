@@ -181,6 +181,9 @@ def select_business():
         .eq('user_id', current_user.id).execute()
     biz_ids = [r['biz_id'] for r in (ubm.data or [])]
     if not biz_ids:
+        # 슈퍼어드민은 회사 없어도 어드민 콘솔로
+        if current_user.is_super_admin:
+            return redirect(url_for('admin_saas.dashboard'))
         flash('소속된 회사가 없습니다', 'warning')
         return redirect(url_for('auth.signup'))
 

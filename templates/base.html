@@ -29,6 +29,11 @@
           {% if g.biz_id %}
             <span class="biz-badge">biz_id: {{ g.biz_id }}</span>
           {% endif %}
+          {% if current_user.is_super_admin %}
+            <a href="{{ url_for('admin_saas.dashboard') }}" class="btn btn-sm btn-outline-warning">
+              <i class="bi bi-shield-lock"></i> Super Admin
+            </a>
+          {% endif %}
           <span class="text-muted small">{{ current_user.name }}</span>
           <a href="{{ url_for('auth.logout') }}" class="btn btn-sm btn-outline-secondary">로그아웃</a>
         {% else %}

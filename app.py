@@ -97,6 +97,9 @@ def create_app():
     def dashboard():
         if not current_user.is_authenticated:
             return redirect(url_for('auth.login'))
+        # 슈퍼어드민은 회사 없어도 어드민 콘솔로
+        if current_user.is_super_admin and not g.biz_id:
+            return redirect(url_for('admin_saas.dashboard'))
         if not g.biz_id:
             return redirect(url_for('auth.select_business'))
         return render_template('dashboard.html', biz_id=g.biz_id)

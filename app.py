@@ -32,6 +32,29 @@ def create_app():
     from config import Config
     app.config.from_object(Config)
 
+    # ─── 인코딩 / 시간 표준 (CONVENTIONS.md 1, 2) ───
+    # JSON 응답 UTF-8 (한글 escape 안 함)
+    app.config['JSON_AS_ASCII'] = False
+    app.json.ensure_ascii = False
+    # 로그 타임스탬프 KST
+    import time as _time
+    logging.Formatter.converter = lambda *args: _time.localtime(_time.time() + 9 * 3600)
+
+    # Jinja KST 필터
+    from services.tz_utils import to_kst
+    @app.template_filter('kst')
+    def _kst_filter(dt, fmt='%Y-%m-%d %H:%M'):
+        if not dt:
+            return ''
+        kst = to_kst(dt)
+        return kst.strftime(fmt) if kst else str(dt)
+    @app.template_filter('kst_date')
+    def _kst_date_filter(dt):
+        return _kst_filter(dt, '%Y-%m-%d')
+    @app.template_filter('kst_full')
+    def _kst_full_filter(dt):
+        return _kst_filter(dt, '%Y-%m-%d %H:%M:%S KST')
+
     # ─── 멀티테넌트 가드 ───
     # SupabaseDB 모든 메서드에 biz_id=g.biz_id 자동 주입.
     # 레거시 blueprints에서 biz_id 누락해도 사업자 격리 보장.

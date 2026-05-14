@@ -126,7 +126,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id, created_at
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action, created_at DESC);
 
 
--- FK 추가 (businesses.plan_id → plans.id) 순환 참조 방지 위해 마지막에
+-- FK at the end (businesses.plan_id -> plans.id) to avoid circular dep
 ALTER TABLE businesses
     ADD CONSTRAINT fk_businesses_plan
     FOREIGN KEY (plan_id) REFERENCES plans(id) ON DELETE SET NULL;

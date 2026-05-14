@@ -341,7 +341,7 @@ CREATE INDEX IF NOT EXISTS idx_po_biz_date ON purchase_orders(biz_id, order_date
 
 
 -- ──────────────────────────────────────────────
--- my_business (자사 사업장 정보 — 거래명세서 발행 정보 등)
+-- my_business (own business info — trade statement issuer info etc)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS my_business (
     id              BIGSERIAL PRIMARY KEY,

@@ -96,8 +96,8 @@ def copy_clipboard_utf16(text):
 def verify_no_korean(sql, file_path):
     kor = [c for c in sql if '가' <= c <= '힣']
     if kor:
-        print(f'[WARN] {file_path} has {len(kor)} Korean chars — encoding risk!')
-        print('       Use U&\\\'\\\\XXXX\\\' Unicode escape for all Korean SQL literals.')
+        print(f'[WARN] {file_path} has {len(kor)} Korean chars - encoding risk!')
+        print("       Use U&'\\XXXX' Unicode escape for all Korean SQL literals.")
         return False
     print(f'[OK] {file_path}: 0 Korean chars (encoding safe)')
     return True

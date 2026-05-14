@@ -242,17 +242,80 @@ rows = paginate_all(
 )
 ```
 
-## 6. canonical product_name
+## 6. 품목 식별 — SKU 우선 + canonical name + 띄어쓰기 무관
 
+### 핵심 원칙
+- **SKU가 1차 식별자** — 오기입/이름변경에도 안전
+- **product_name 비교는 canonical()** — 띄어쓰기/전각/zero-width 모두 무관
+- **DB trigger로 강제** — 코드 누락해도 자동 정규화
+
+### canonical() 처리 범위
+모두 같은 결과 ('전복벌집200g'):
+```
+'전복 벌집 200g'    (일반 공백)
+'전복　벌집200g'    (전각 공백 U+3000)
+'전복​벌집200g' (zero-width space)
+'전복 벌집 200g '  (앞뒤 공백)
+'전복・벌집 ２００ｇ' (전각 숫자 + 가운뎃점) → NFKC + 공백 제거
+```
+
+내부 처리:
+1. NFKC 정규화 (전각→반각, 합성문자 통일)
+2. 모든 공백/zero-width 제거
+3. strip
+
+### SKU 자동 생성
+- product_costs INSERT 시 `sku` NULL이면 자동 부여
+- 형식: `P-{biz_id}-{6자리시퀀스}` (예: `P-12-000041`)
+- DB trigger `fn_assign_sku()` 처리, 테넌트별 sku_sequences 테이블
+
+### 품목 찾기 우선순위 (`services/product_lookup.py`)
+1. **SKU 정확 일치** — `find_product(biz_id, 'P-12-000041')`
+2. **barcode 정확 일치**
+3. **canonical(product_name) 정확 일치**
+4. **canonical(product_name) 부분 일치** (단일 결과만)
+
+### 사용 패턴
 ```python
+from services.product_lookup import find_product, search_products
 from services.product_name import canonical
 
-# INSERT/UPDATE 전에 강제
-product = canonical(user_input)            # 공백 제거, strip
+# 단건 식별 (출고/생산 입력 시)
+prod = find_product(g.biz_id, user_input)  # SKU/barcode/이름 자동
+if not prod:
+    flash('품목 없음 — SKU 또는 정확한 이름 입력', 'danger')
+
+# 자동완성/검색
+items = search_products(g.biz_id, q, limit=20)
+
+# 저장 직전 (DB trigger도 있지만 코드도 강제)
+product = canonical(user_input)
 db.table('product_costs').insert({'product_name': product, ...}).execute()
 ```
 
-DB 레벨에서 trigger로 강화 가능 (Phase 2).
+### DB-level 강제 (마이그 006)
+- `product_costs`, `stock_ledger`, `order_transactions`, `manual_trades`,
+  `daily_revenue`, `option_master` 모두 BEFORE INSERT/UPDATE trigger
+- Python에서 canonical() 누락해도 DB가 자동 정규화
+- SKU UNIQUE: `(biz_id, sku) UNIQUE WHERE NOT is_deleted`
+
+### RPC: rpc_find_product / rpc_search_products
+SQL 레벨 검색 함수. Python `services/product_lookup.py`와 동일 로직.
+
+```sql
+SELECT * FROM rpc_find_product(p_biz_id := 12, p_query := '전복벌집');
+SELECT * FROM rpc_search_products(p_biz_id := 12, p_query := '전복', p_limit := 20);
+```
+
+### 띄어쓰기 무관 매칭 — 실전 예시
+```
+사용자 입력         → canonical()        → 동일 매칭
+'전복벌집200g'      → '전복벌집200g'     ★ baseline
+'전복 벌집 200g'    → '전복벌집200g'     ★ 같음
+'전복벌집  200g'    → '전복벌집200g'     ★ 같음
+'전복　벌집 200g'   → '전복벌집200g'     ★ 같음 (전각공백)
+'전복벌집２００ｇ'  → '전복벌집200g'     ★ 같음 (NFKC 전각->반각)
+```
 
 ## 7. 보안
 

@@ -179,6 +179,32 @@ class SupabaseDB(DBBase):
             return query.eq("biz_id", biz_id)
         return query
 
+    def _resolve_biz_id(self, biz_id):
+        """biz_id 명시 우선, 없으면 Flask g.biz_id fallback.
+        Flask context 밖에서 호출 + biz_id None 이면 None 반환 (호출자가 _with_biz 로 처리).
+        """
+        if biz_id is not None:
+            return biz_id
+        try:
+            from flask import g, has_request_context
+            if has_request_context():
+                return getattr(g, 'biz_id', None)
+        except Exception:
+            pass
+        return None
+
+    def _inject_biz_id(self, payload, biz_id):
+        """mutation payload(dict or list[dict])에 biz_id 주입 (이미 있으면 유지)."""
+        if biz_id is None:
+            return payload
+        if isinstance(payload, dict):
+            payload.setdefault('biz_id', biz_id)
+        elif isinstance(payload, list):
+            for row in payload:
+                if isinstance(row, dict):
+                    row.setdefault('biz_id', biz_id)
+        return payload
+
     def _retry_on_disconnect(self, fn, *args, **kwargs):
         """연결 오류 시 재연결 후 1회 재시도하는 범용 래퍼."""
         try:
@@ -280,10 +306,12 @@ class SupabaseDB(DBBase):
             row['product_name'] = norm_map.get(pn_clean) or pn_clean or str(pn).strip()
         return payload_list
 
-    def insert_stock_ledger(self, payload_list):
+    def insert_stock_ledger(self, payload_list, *, biz_id=None):
         if not payload_list:
             return {'inserted': 0, 'failed': 0, 'errors': []}
+        biz_id = self._resolve_biz_id(biz_id)
         payload_list = self._normalize_product_names(payload_list)
+        payload_list = self._inject_biz_id(payload_list, biz_id)
         filtered = self._filter_payload(payload_list)
 
         def _batch_insert():
@@ -312,7 +340,7 @@ class SupabaseDB(DBBase):
                     print(f"[stock_ledger] 개별 삽입 실패 — {err_msg}")
             return {'inserted': inserted, 'failed': failed, 'errors': errors}
 
-    def upsert_stock_ledger_idempotent(self, payload_list):
+    def upsert_stock_ledger_idempotent(self, payload_list, *, biz_id=None):
         """event_uid 기반 중복 방지 insert.
         event_uid가 이미 존재하면 스킵(무시).
         event_uid가 없는 레코드는 일반 insert.
@@ -320,7 +348,9 @@ class SupabaseDB(DBBase):
         """
         if not payload_list:
             return 0, 0
+        biz_id = self._resolve_biz_id(biz_id)
         payload_list = self._normalize_product_names(payload_list)
+        payload_list = self._inject_biz_id(payload_list, biz_id)
         filtered = self._filter_payload(payload_list)
 
         # event_uid가 있는 것과 없는 것 분리
@@ -336,8 +366,9 @@ class SupabaseDB(DBBase):
             existing_uids = set()
             try:
                 uid_list = [p['event_uid'] for p in with_uid]
-                res = self.client.table("stock_ledger").select("event_uid") \
-                    .in_("event_uid", uid_list).execute()
+                q = self.client.table("stock_ledger").select("event_uid") \
+                    .in_("event_uid", uid_list)
+                res = self._with_biz(q, biz_id).execute()
                 existing_uids = {r['event_uid'] for r in (res.data or [])}
             except Exception:
                 pass  # 조회 실패 시 전체 삽입 시도
@@ -392,7 +423,8 @@ class SupabaseDB(DBBase):
 
     def query_stock_ledger(self, date_to, date_from=None, location=None,
                             category=None, type_list=None, order_desc=False,
-                            include_blind=False):
+                            include_blind=False, *, biz_id=None):
+        biz_id = self._resolve_biz_id(biz_id)
         def builder(table):
             q = self.client.table(table).select("*")
             if not include_blind:
@@ -406,6 +438,7 @@ class SupabaseDB(DBBase):
                 q = q.eq("category", category)
             if type_list:
                 q = q.in_("type", type_list)
+            q = self._with_biz(q, biz_id)
             if order_desc:
                 q = q.order("transaction_date", desc=True).order("id", desc=True)
             else:
@@ -583,12 +616,14 @@ class SupabaseDB(DBBase):
 
     # --- daily_revenue ---
 
-    def upsert_revenue(self, payload_list, skip_auto_stock_categories=None):
+    def upsert_revenue(self, payload_list, skip_auto_stock_categories=None, *, biz_id=None):
         """daily_revenue 저장.
         skip_auto_stock_categories: 호출측에서 직접 stock_ledger 처리하는 카테고리는 자동연동 스킵.
         """
         if not payload_list:
             return
+        biz_id = self._resolve_biz_id(biz_id)
+        self._inject_biz_id(payload_list, biz_id)
         from services.product_name import canonical
         # channel, invoice_no 필드 기본값 보장 + product_name canonical 통일
         for p in payload_list:
@@ -637,11 +672,11 @@ class SupabaseDB(DBBase):
 
         # 로켓/거래처매출 gap-filler: 호출자가 stock_ledger 를 쓰지 않은 경우 자동 보완
         try:
-            self._auto_stock_from_revenue(payload_list, skip_categories=skip_auto_stock_categories)
+            self._auto_stock_from_revenue(payload_list, skip_categories=skip_auto_stock_categories, biz_id=biz_id)
         except Exception as e:
             print(f'[upsert_revenue] 자동 stock_ledger 생성 실패: {e}')
 
-    def _auto_stock_from_revenue(self, payload_list, skip_categories=None):
+    def _auto_stock_from_revenue(self, payload_list, skip_categories=None, *, biz_id=None):
         """daily_revenue 로켓/거래처매출에 대해 누락된 stock_ledger SALES_OUT 을 채움.
 
         안전성:
@@ -690,12 +725,12 @@ class SupabaseDB(DBBase):
                 # 같은 날 다른 채널(스마트스토어 등)의 SALES_OUT 존재 시 로켓 자동연동이
                 # 완전히 스킵되는 버그 발생 (2026-04-20~21 로켓 5건 누락 사고, 2026-04-21 발견).
                 # → 이 경로가 만드는 event_uid 가 이미 있을 때만 스킵하는 것으로 복원.
-                existing = self.client.table('stock_ledger') \
+                eq_q = self.client.table('stock_ledger') \
                     .select('id') \
                     .eq('event_uid', event_uid) \
                     .neq('status', 'cancelled') \
-                    .limit(1) \
-                    .execute()
+                    .limit(1)
+                existing = self._with_biz(eq_q, biz_id).execute()
                 if existing.data:
                     continue
             except Exception:
@@ -713,12 +748,12 @@ class SupabaseDB(DBBase):
 
         if to_insert:
             try:
-                self.insert_stock_ledger(to_insert)
+                self.insert_stock_ledger(to_insert, biz_id=biz_id)
                 print(f'[upsert_revenue] daily_revenue→stock_ledger 자동연동: {len(to_insert)}건')
             except Exception as e:
                 print(f'[upsert_revenue] 자동연동 insert 실패: {e}')
 
-    def query_revenue(self, date_from=None, date_to=None, category=None, channel=None):
+    def query_revenue(self, date_from=None, date_to=None, category=None, channel=None, *, biz_id=None):
         """매출 조회 (order_transactions + daily_revenue 합산).
 
         - order_transactions: 온라인 채널 매출 (스마트스토어, 쿠팡, 자사몰, 카카오 등)
@@ -733,6 +768,7 @@ class SupabaseDB(DBBase):
             LEGACY_CATEGORY_TO_CHANNEL,
         )
 
+        biz_id = self._resolve_biz_id(biz_id)
         agg = {}
 
         # ── 1. order_transactions (온라인 채널 매출) ──
@@ -760,7 +796,8 @@ class SupabaseDB(DBBase):
                     q = self.client.table(table).select(
                         "order_date,channel,product_name,qty,unit_price,"
                         "total_amount,settlement,commission,discount_amount,shipping_fee"
-                    ).eq("status", "정상").order("id")
+                    ).eq("status", "정상")
+                    q = self._with_biz(q, biz_id).order("id")
                     q = q.gte("order_date", _cf).lte("order_date", _ct)
                     if channel and channel != "전체":
                         q = q.eq("channel", channel)
@@ -810,7 +847,8 @@ class SupabaseDB(DBBase):
             q = self.client.table(table).select(
                 "revenue_date,product_name,category,channel,"
                 "qty,unit_price,revenue"
-            ).or_("is_deleted.is.null,is_deleted.eq.false").order("revenue_date", desc=True)
+            ).or_("is_deleted.is.null,is_deleted.eq.false")
+            q = self._with_biz(q, biz_id).order("revenue_date", desc=True)
             if date_from:
                 q = q.gte("revenue_date", date_from)
             if date_to:
@@ -1045,11 +1083,14 @@ class SupabaseDB(DBBase):
 
     # --- product_costs (품목별 단가: 매입/생산 구분) ---
 
-    def query_product_costs(self):
+    def query_product_costs(self, *, biz_id=None):
         """product_costs 전체 조회 → {product_name: {cost_price, unit, memo, cost_type, weight, weight_unit}} dict."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            rows = self._paginate_query("product_costs",
-                lambda t: self.client.table(t).select("*").or_("is_deleted.is.null,is_deleted.eq.false").order("product_name"))
+            def _b(t):
+                q = self.client.table(t).select("*").or_("is_deleted.is.null,is_deleted.eq.false")
+                return self._with_biz(q, biz_id).order("product_name")
+            rows = self._paginate_query("product_costs", _b)
             return {r['product_name']: r for r in rows}
         except Exception:
             return {}
@@ -1059,7 +1100,7 @@ class SupabaseDB(DBBase):
                             material_type='원료',
                             purchase_unit='', standard_unit='',
                             conversion_ratio=1, food_type='',
-                            category='', storage_method=''):
+                            category='', storage_method='', *, biz_id=None):
         """품목 단가 1건 등록/수정 (upsert).
         cost_type: '매입' = 원재료 매입단가, '생산' = 완제품 생산단가
         material_type: '원료', '부재료', '반제품', '완제품', '포장재'
@@ -1089,11 +1130,13 @@ class SupabaseDB(DBBase):
             'storage_method': storage_method or '',
             'updated_at': datetime.now(timezone.utc).isoformat(),
         }
+        biz_id = self._resolve_biz_id(biz_id)
+        self._inject_biz_id(payload, biz_id)
         self.client.table("product_costs").upsert(
             payload, on_conflict="product_name"
         ).execute()
 
-    def rename_product(self, old_name, new_name):
+    def rename_product(self, old_name, new_name, *, biz_id=None):
         """품목명 변경 + 관련 테이블 일괄 반영 (상품/제품/반제품 공용).
 
         전파 대상:
@@ -1117,6 +1160,7 @@ class SupabaseDB(DBBase):
             dict: {success, changed: {table: count}, errors: []}
         """
         from services.product_name import canonical
+        biz_id = self._resolve_biz_id(biz_id)
         old = str(old_name).strip()
         new = canonical(new_name)  # 새 이름은 항상 공백제거 강제
         if not old or not new:
@@ -1127,8 +1171,9 @@ class SupabaseDB(DBBase):
 
         # 1) 중복 체크: new_name이 product_costs에 이미 있으면 거절
         try:
-            exists = self.client.table('product_costs').select('product_name') \
-                .eq('product_name', new).limit(1).execute()
+            exq = self.client.table('product_costs').select('product_name') \
+                .eq('product_name', new).limit(1)
+            exists = self._with_biz(exq, biz_id).execute()
             if exists.data:
                 return {
                     'success': False,
@@ -1142,17 +1187,21 @@ class SupabaseDB(DBBase):
 
         # 2) product_costs: UNIQUE(product_name)로 PK일 가능성 → INSERT 신규 + DELETE 기존
         try:
-            old_rows = self.client.table('product_costs').select('*') \
-                .eq('product_name', old).execute().data or []
+            orq = self.client.table('product_costs').select('*') \
+                .eq('product_name', old)
+            old_rows = self._with_biz(orq, biz_id).execute().data or []
             if old_rows:
                 new_rows = []
                 for r in old_rows:
                     r2 = {k: v for k, v in r.items() if k != 'id'}
                     r2['product_name'] = new
+                    if biz_id is not None:
+                        r2['biz_id'] = biz_id
                     new_rows.append(r2)
                 self.client.table('product_costs').insert(new_rows).execute()
-                self.client.table('product_costs').delete() \
-                    .eq('product_name', old).execute()
+                dq = self.client.table('product_costs').delete() \
+                    .eq('product_name', old)
+                self._with_biz(dq, biz_id).execute()
                 changed['product_costs'] = len(old_rows)
             else:
                 changed['product_costs'] = 0
@@ -1176,8 +1225,9 @@ class SupabaseDB(DBBase):
             if tbl == 'bom':
                 continue  # 아래 별도 처리
             try:
-                r = self.client.table(tbl).update({'product_name': new}) \
-                    .eq('product_name', old).execute()
+                uq = self.client.table(tbl).update({'product_name': new}) \
+                    .eq('product_name', old)
+                r = self._with_biz(uq, biz_id).execute()
                 # postgrest는 update 결과 data 반환 안 할 수 있으므로 count로 재조회
                 changed[tbl] = len(r.data) if r.data else 0
             except Exception as e:
@@ -1191,8 +1241,9 @@ class SupabaseDB(DBBase):
         try:
             for col in ('parent_product_name', 'product_name', 'child_product_name', 'material_name'):
                 try:
-                    r = self.client.table('bom').update({col: new}) \
-                        .eq(col, old).execute()
+                    bq = self.client.table('bom').update({col: new}) \
+                        .eq(col, old)
+                    r = self._with_biz(bq, biz_id).execute()
                     if r.data:
                         changed[f'bom.{col}'] = len(r.data)
                 except Exception:
@@ -1212,13 +1263,14 @@ class SupabaseDB(DBBase):
             'errors': errors,
         }
 
-    def upsert_product_costs_batch(self, items):
+    def upsert_product_costs_batch(self, items, *, biz_id=None):
         """품목 단가 일괄 등록/수정.
         items: [{product_name, cost_price, unit?, memo?, weight?, weight_unit?,
                  cost_type?, material_type?, purchase_unit?, standard_unit?,
                  conversion_ratio?, food_type?}]
         """
         from datetime import datetime, timezone
+        biz_id = self._resolve_biz_id(biz_id)
         now = datetime.now(timezone.utc).isoformat()
         payload = []
         for item in items:
@@ -1241,6 +1293,7 @@ class SupabaseDB(DBBase):
             })
         if not payload:
             return
+        self._inject_biz_id(payload, biz_id)
         for i in range(0, len(payload), 500):
             self.client.table("product_costs").upsert(
                 payload[i:i + 500], on_conflict="product_name"
@@ -1257,7 +1310,7 @@ class SupabaseDB(DBBase):
 
     def insert_cost_history(self, product_name, old_cost_price, new_cost_price,
                             old_conversion_ratio=1, new_conversion_ratio=1,
-                            changed_by='', change_reason='', effective_date=None):
+                            changed_by='', change_reason='', effective_date=None, *, biz_id=None):
         """매입단가 변경 이력 1건 저장."""
         from datetime import datetime, timezone
         if effective_date is None:
@@ -1273,15 +1326,18 @@ class SupabaseDB(DBBase):
             'effective_date': str(effective_date),
             'created_at': datetime.now(timezone.utc).isoformat(),
         }
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         self.client.table("product_cost_history").insert(payload).execute()
 
-    def query_cost_history(self, product_name=None, limit=100):
+    def query_cost_history(self, product_name=None, limit=100, *, biz_id=None):
         """매입단가 변경 이력 조회.
         product_name이 주어지면 해당 품목만, 없으면 최신순 전체.
         Returns: list of dict.
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("product_cost_history").select("*")
+            q = self._with_biz(q, biz_id)
             if product_name:
                 # 공백 제거 정규화 양쪽 모두 검색
                 norm = product_name.replace(' ', '')
@@ -1294,17 +1350,20 @@ class SupabaseDB(DBBase):
 
     # --- channel_costs (채널별 비용) ---
 
-    def query_channel_costs(self):
+    def query_channel_costs(self, *, biz_id=None):
         """채널별 비용 전체 조회 → {channel: {fee_rate, shipping, packaging, other_cost, memo}}."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            rows = self._paginate_query("channel_costs",
-                lambda t: self.client.table(t).select("*").or_("is_deleted.is.null,is_deleted.eq.false").order("channel"))
+            def _b(t):
+                q = self.client.table(t).select("*").or_("is_deleted.is.null,is_deleted.eq.false")
+                return self._with_biz(q, biz_id).order("channel")
+            rows = self._paginate_query("channel_costs", _b)
             return {r['channel']: r for r in rows}
         except Exception:
             return {}
 
     def upsert_channel_cost(self, channel, fee_rate=0, shipping=0,
-                            packaging=0, other_cost=0, memo=''):
+                            packaging=0, other_cost=0, memo='', *, biz_id=None):
         """채널 비용 1건 등록/수정 (upsert on channel)."""
         from datetime import datetime, timezone
         payload = {
@@ -1316,6 +1375,7 @@ class SupabaseDB(DBBase):
             'memo': memo,
             'updated_at': datetime.now(timezone.utc).isoformat(),
         }
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         self.client.table("channel_costs").upsert(
             payload, on_conflict="channel"
         ).execute()
@@ -1329,20 +1389,24 @@ class SupabaseDB(DBBase):
 
     # --- business_partners ---
 
-    def query_partners(self):
+    def query_partners(self, *, biz_id=None):
         """거래처 전체 조회 (이름순)."""
+        biz_id = self._resolve_biz_id(biz_id)
         def builder(table):
-            return self.client.table(table).select("*").or_("is_deleted.is.null,is_deleted.eq.false").order("partner_name")
+            q = self.client.table(table).select("*").or_("is_deleted.is.null,is_deleted.eq.false")
+            return self._with_biz(q, biz_id).order("partner_name")
         return self._paginate_query("business_partners", builder)
 
-    def insert_partner(self, payload):
+    def insert_partner(self, payload, *, biz_id=None):
         """거래처 1건 등록."""
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         self.client.table("business_partners").insert(payload).execute()
 
-    def insert_partners_batch(self, payload_list):
+    def insert_partners_batch(self, payload_list, *, biz_id=None):
         """거래처 엑셀 일괄 등록."""
         if not payload_list:
             return
+        self._inject_biz_id(payload_list, self._resolve_biz_id(biz_id))
         for i in range(0, len(payload_list), 500):
             self.client.table("business_partners").insert(
                 payload_list[i:i + 500]).execute()
@@ -1416,10 +1480,12 @@ class SupabaseDB(DBBase):
 
     # --- manual_trades ---
 
-    def query_manual_trades(self, date_from=None, date_to=None, partner_name=None, keyword=None):
+    def query_manual_trades(self, date_from=None, date_to=None, partner_name=None, keyword=None, *, biz_id=None):
         """수동 거래 조회 (날짜/거래처/품목명 필터)."""
+        biz_id = self._resolve_biz_id(biz_id)
         def builder(table):
-            q = self.client.table(table).select("*").or_("is_deleted.is.null,is_deleted.eq.false").order("trade_date", desc=True)
+            q = self.client.table(table).select("*").or_("is_deleted.is.null,is_deleted.eq.false")
+            q = self._with_biz(q, biz_id).order("trade_date", desc=True)
             if date_from:
                 q = q.gte("trade_date", date_from)
             if date_to:
@@ -1431,13 +1497,16 @@ class SupabaseDB(DBBase):
             return q
         return self._paginate_query("manual_trades", builder)
 
-    def insert_manual_trade(self, payload):
+    def insert_manual_trade(self, payload, *, biz_id=None):
         """수동 거래 1건 등록."""
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         self.client.table("manual_trades").insert(payload).execute()
 
-    def query_manual_trade_by_id(self, trade_id):
+    def query_manual_trade_by_id(self, trade_id, *, biz_id=None):
         """수동 거래 1건 조회 (ID 기준)."""
-        res = self.client.table("manual_trades").select("*").eq("id", trade_id).or_("is_deleted.is.null,is_deleted.eq.false").execute()
+        biz_id = self._resolve_biz_id(biz_id)
+        q = self.client.table("manual_trades").select("*").eq("id", trade_id).or_("is_deleted.is.null,is_deleted.eq.false")
+        res = self._with_biz(q, biz_id).execute()
         return res.data[0] if res.data else None
 
     def delete_manual_trade(self, trade_id, biz_id=None):
@@ -1468,14 +1537,17 @@ class SupabaseDB(DBBase):
 
     # --- 발주서 이력 ---
 
-    def insert_purchase_order(self, payload):
+    def insert_purchase_order(self, payload, *, biz_id=None):
         """발주서 1건 저장."""
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         self.client.table("purchase_orders").insert(payload).execute()
 
-    def query_purchase_orders(self, date_from=None, date_to=None, partner_name=None):
+    def query_purchase_orders(self, date_from=None, date_to=None, partner_name=None, *, biz_id=None):
         """발주서 이력 조회 (날짜/거래처 필터)."""
+        biz_id = self._resolve_biz_id(biz_id)
         def builder(table):
-            q = self.client.table(table).select("*").or_("is_deleted.is.null,is_deleted.eq.false").order("order_date", desc=True)
+            q = self.client.table(table).select("*").or_("is_deleted.is.null,is_deleted.eq.false")
+            q = self._with_biz(q, biz_id).order("order_date", desc=True)
             if date_from:
                 q = q.gte("order_date", date_from)
             if date_to:
@@ -1485,9 +1557,11 @@ class SupabaseDB(DBBase):
             return q
         return self._paginate_query("purchase_orders", builder)
 
-    def query_purchase_order_by_id(self, po_id):
+    def query_purchase_order_by_id(self, po_id, *, biz_id=None):
         """발주서 1건 조회 (ID 기준)."""
-        res = self.client.table("purchase_orders").select("*").eq("id", po_id).or_("is_deleted.is.null,is_deleted.eq.false").execute()
+        biz_id = self._resolve_biz_id(biz_id)
+        q = self.client.table("purchase_orders").select("*").eq("id", po_id).or_("is_deleted.is.null,is_deleted.eq.false")
+        res = self._with_biz(q, biz_id).execute()
         return res.data[0] if res.data else None
 
     def update_purchase_order(self, po_id, update_data, biz_id=None):
@@ -1550,34 +1624,49 @@ class SupabaseDB(DBBase):
         self._option_cache['data_list'] = None
         self._option_cache['ts'] = 0
 
-    def query_option_master(self, use_cache=True):
+    def query_option_master(self, use_cache=True, *, biz_id=None):
         """옵션마스터 전체 조회 (sort_order 정렬, 메모리 캐시 적용)."""
+        biz_id = self._resolve_biz_id(biz_id)
+        # biz_id 별 캐시 격리 — 사업자간 데이터 누출 방지
+        if not hasattr(self, '_option_cache_by_biz'):
+            self._option_cache_by_biz = {}
+        cache_key = biz_id if biz_id is not None else '__none__'
+        cache = self._option_cache_by_biz.get(cache_key)
         now = time.time()
-        if use_cache and self._option_cache['data'] is not None and (now - self._option_cache['ts']) < self._option_cache['ttl']:
-            return self._option_cache['data']
+        if use_cache and cache and cache.get('data') is not None and (now - cache.get('ts', 0)) < self._option_cache['ttl']:
+            return cache['data']
 
         def builder(table):
-            return self.client.table(table).select("*").or_("is_deleted.is.null,is_deleted.eq.false").order("sort_order").order("id")
+            q = self.client.table(table).select("*").or_("is_deleted.is.null,is_deleted.eq.false")
+            q = self._with_biz(q, biz_id)
+            return q.order("sort_order").order("id")
         data = self._paginate_query("option_master", builder)
 
-        # 캐시 갱신
+        # 캐시 갱신 (biz_id별 격리)
+        self._option_cache_by_biz[cache_key] = {'data': data, 'data_list': None, 'ts': now}
+        # 레거시 캐시 호환
         self._option_cache['data'] = data
         self._option_cache['data_list'] = None  # list 캐시도 다시 생성
         self._option_cache['ts'] = now
         return data
 
-    def query_option_master_as_list(self, use_cache=True):
+    def query_option_master_as_list(self, use_cache=True, *, biz_id=None):
         """옵션마스터를 OrderProcessor 호환 dict list로 반환 (캐시).
 
         Args:
             use_cache: False면 캐시 완전 우회, DB 직접 조회.
         """
+        biz_id = self._resolve_biz_id(biz_id)
         # list 캐시가 유효하면 바로 반환
         now = time.time()
-        if use_cache and self._option_cache['data_list'] is not None and (now - self._option_cache['ts']) < self._option_cache['ttl']:
-            return self._option_cache['data_list']
+        if not hasattr(self, '_option_cache_by_biz'):
+            self._option_cache_by_biz = {}
+        cache_key = biz_id if biz_id is not None else '__none__'
+        cache = self._option_cache_by_biz.get(cache_key, {})
+        if use_cache and cache.get('data_list') is not None and (now - cache.get('ts', 0)) < self._option_cache['ttl']:
+            return cache['data_list']
 
-        all_rows = self.query_option_master(use_cache=use_cache)
+        all_rows = self.query_option_master(use_cache=use_cache, biz_id=biz_id)
         result = []
         for r in all_rows:
             result.append({
@@ -1589,34 +1678,41 @@ class SupabaseDB(DBBase):
                 'Key': r.get('match_key', ''),
             })
         self._option_cache['data_list'] = result
+        if cache_key in self._option_cache_by_biz:
+            self._option_cache_by_biz[cache_key]['data_list'] = result
         return result
 
-    def search_option_master(self, keyword):
+    def search_option_master(self, keyword, *, biz_id=None):
         """옵션마스터 검색 (품목명 or 원문명 부분 일치, 캐시 활용)."""
+        biz_id = self._resolve_biz_id(biz_id)
         keyword_upper = keyword.replace(' ', '').upper()
-        all_rows = self.query_option_master()  # 캐시 사용
+        all_rows = self.query_option_master(biz_id=biz_id)  # 캐시 사용
         return [r for r in all_rows
                 if keyword_upper in (r.get('match_key', '') or '').upper()
                 or keyword_upper in (r.get('product_name', '') or '').replace(' ', '').upper()]
 
-    def insert_option_master(self, payload):
+    def insert_option_master(self, payload, *, biz_id=None):
         """옵션마스터 1건 등록/갱신 (match_key 자동 계산, 중복 시 upsert).
         product_name은 canonical()로 공백 자동제거 — 향후 매칭 깨짐 방지.
         """
+        biz_id = self._resolve_biz_id(biz_id)
         from services.product_name import canonical
         orig = payload.get('original_name', '')
         payload['match_key'] = normalize_match_key(orig)
         if payload.get('product_name'):
             payload['product_name'] = canonical(payload['product_name'])
+        self._inject_biz_id(payload, biz_id)
         self.client.table("option_master").upsert(
             payload, on_conflict="match_key"
         ).execute()
         self._invalidate_option_cache()
 
-    def insert_option_master_batch(self, payload_list, batch_size=500):
+    def insert_option_master_batch(self, payload_list, batch_size=500, *, biz_id=None):
         """옵션마스터 일괄 등록 (중복 시 upsert).
         product_name은 canonical()로 공백 자동제거.
         """
+        biz_id = self._resolve_biz_id(biz_id)
+        self._inject_biz_id(payload_list, biz_id)
         from services.product_name import canonical
         for row in payload_list:
             orig = row.get('original_name', '')
@@ -2005,20 +2101,23 @@ class SupabaseDB(DBBase):
 
         return new_id
 
-    def restore_stock_ledger(self, row_id):
+    def restore_stock_ledger(self, row_id, *, biz_id=None):
         """stock_ledger 블라인드/삭제 복원 (status → 'active')."""
-        self.client.table("stock_ledger").update({
+        biz_id = self._resolve_biz_id(biz_id)
+        q = self.client.table("stock_ledger").update({
             'status': 'active',
             'is_deleted': False,
             'deleted_at': None,
             'deleted_by': None,
-        }).eq("id", row_id).execute()
+        }).eq("id", row_id)
+        self._with_biz(q, biz_id).execute()
 
-    def query_stock_ledger_by_id(self, row_id):
+    def query_stock_ledger_by_id(self, row_id, *, biz_id=None):
         """stock_ledger 1건 조회 (ID 기준)."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("stock_ledger").select("*") \
-                .eq("id", row_id).limit(1).execute()
+            q = self.client.table("stock_ledger").select("*").eq("id", row_id)
+            res = self._with_biz(q, biz_id).limit(1).execute()
             return res.data[0] if res.data else None
         except Exception:
             return None
@@ -2097,10 +2196,12 @@ class SupabaseDB(DBBase):
     # ================================================================
 
     def query_promotions(self, product_name=None, category=None,
-                         date_from=None, date_to=None, active_only=False):
+                         date_from=None, date_to=None, active_only=False, *, biz_id=None):
         """행사 목록 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("promotions").select("*").or_("is_deleted.is.null,is_deleted.eq.false")
+            q = self._with_biz(q, biz_id)
             if product_name:
                 q = q.ilike("product_name", f"%{product_name}%")
             if category:
@@ -2117,24 +2218,25 @@ class SupabaseDB(DBBase):
         except Exception:
             return []
 
-    def query_active_promotion(self, product_name, category, target_date):
+    def query_active_promotion(self, product_name, category, target_date, *, biz_id=None):
         """특정 품목+채널+일자에 활성 행사 조회 (가장 최근 등록 우선)."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("promotions").select("*") \
+            q = self.client.table("promotions").select("*") \
                 .eq("product_name", product_name) \
                 .eq("category", category) \
                 .eq("is_active", True) \
                 .or_("is_deleted.is.null,is_deleted.eq.false") \
                 .lte("start_date", target_date) \
-                .gte("end_date", target_date) \
-                .order("created_at", desc=True) \
-                .limit(1).execute()
+                .gte("end_date", target_date)
+            res = self._with_biz(q, biz_id).order("created_at", desc=True).limit(1).execute()
             return res.data[0] if res.data else None
         except Exception:
             return None
 
-    def insert_promotion(self, payload):
+    def insert_promotion(self, payload, *, biz_id=None):
         """행사 1건 등록."""
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         self.client.table("promotions").insert(payload).execute()
 
     def update_promotion(self, promo_id, update_data, biz_id=None):
@@ -2156,10 +2258,12 @@ class SupabaseDB(DBBase):
     # ================================================================
 
     def query_coupons(self, product_name=None, category=None,
-                      date_from=None, date_to=None, active_only=False):
+                      date_from=None, date_to=None, active_only=False, *, biz_id=None):
         """쿠폰 목록 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("coupons").select("*").or_("is_deleted.is.null,is_deleted.eq.false")
+            q = self._with_biz(q, biz_id)
             if product_name:
                 q = q.ilike("product_name", f"%{product_name}%")
             if category:
@@ -2176,24 +2280,25 @@ class SupabaseDB(DBBase):
         except Exception:
             return []
 
-    def query_active_coupon(self, product_name, category, target_date):
+    def query_active_coupon(self, product_name, category, target_date, *, biz_id=None):
         """특정 품목+채널+일자에 활성 쿠폰 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("coupons").select("*") \
+            q = self.client.table("coupons").select("*") \
                 .eq("product_name", product_name) \
                 .eq("category", category) \
                 .eq("is_active", True) \
                 .or_("is_deleted.is.null,is_deleted.eq.false") \
                 .lte("start_date", target_date) \
-                .gte("end_date", target_date) \
-                .order("created_at", desc=True) \
-                .limit(1).execute()
+                .gte("end_date", target_date)
+            res = self._with_biz(q, biz_id).order("created_at", desc=True).limit(1).execute()
             return res.data[0] if res.data else None
         except Exception:
             return None
 
-    def insert_coupon(self, payload):
+    def insert_coupon(self, payload, *, biz_id=None):
         """쿠폰 1건 등록."""
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         self.client.table("coupons").insert(payload).execute()
 
     def update_coupon(self, coupon_id, update_data, biz_id=None):
@@ -2265,17 +2370,20 @@ class SupabaseDB(DBBase):
     # Phase 1: 주문 수집 파이프라인
     # ================================================================
 
-    def create_import_run(self, channel, filename, file_hash, uploaded_by, total_rows):
+    def create_import_run(self, channel, filename, file_hash, uploaded_by, total_rows, *, biz_id=None):
         """import_runs 레코드 생성. 반환: (import_run_id, error_msg)"""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("import_runs").insert({
+            payload = {
                 "channel": channel,
                 "filename": filename,
                 "file_hash": file_hash,
                 "uploaded_by": uploaded_by,
                 "total_rows": total_rows,
                 "status": "processing",
-            }).execute()
+            }
+            self._inject_biz_id(payload, biz_id)
+            res = self.client.table("import_runs").insert(payload).execute()
             if res.data:
                 return res.data[0]["id"], None
             return None, "INSERT OK but no ID returned"
@@ -2283,44 +2391,54 @@ class SupabaseDB(DBBase):
             print(f"[DB] create_import_run error: {e}")
             return None, str(e)
 
-    def update_import_run(self, run_id, update_data):
+    def update_import_run(self, run_id, update_data, *, biz_id=None):
         """import_runs 결과 갱신."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            self.client.table("import_runs").update(update_data) \
-                .eq("id", run_id).execute()
+            q = self.client.table("import_runs").update(update_data) \
+                .eq("id", run_id)
+            self._with_biz(q, biz_id).execute()
         except Exception as e:
             print(f"[DB] update_import_run error: {e}")
 
-    def query_import_runs(self, limit=50):
+    def query_import_runs(self, limit=50, *, biz_id=None):
         """최근 import_runs 목록 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("import_runs").select("*") \
-                .order("created_at", desc=True).limit(limit).execute()
+            q = self.client.table("import_runs").select("*")
+            res = self._with_biz(q, biz_id).order("created_at", desc=True).limit(limit).execute()
             return res.data or []
         except Exception:
             return []
 
-    def query_import_run_by_id(self, run_id):
+    def query_import_run_by_id(self, run_id, *, biz_id=None):
         """import_runs 상세 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("import_runs").select("*") \
-                .eq("id", run_id).execute()
+            q = self.client.table("import_runs").select("*").eq("id", run_id)
+            res = self._with_biz(q, biz_id).execute()
             return res.data[0] if res.data else None
         except Exception:
             return None
 
-    def upsert_order_batch(self, import_run_id, orders):
+    def upsert_order_batch(self, import_run_id, orders, *, biz_id=None):
         """주문 배치 upsert (RPC 호출).
         orders: [{transaction: {...}, shipping: {...}}, ...]
         반환: {inserted, updated, skipped, failed, errors, rpc_error}
         """
         import json
+        biz_id = self._resolve_biz_id(biz_id)
         # ★ 모든 주문 저장의 choke point — product_name canonical 통일
         from services.product_name import canonical
         for o in orders or []:
             txn = o.get("transaction") if isinstance(o, dict) else None
             if txn and txn.get("product_name"):
                 txn["product_name"] = canonical(txn["product_name"])
+            if txn and biz_id is not None:
+                txn.setdefault("biz_id", biz_id)
+            ship = o.get("shipping") if isinstance(o, dict) else None
+            if ship and biz_id is not None:
+                ship.setdefault("biz_id", biz_id)
         try:
             res = self.client.rpc("rpc_upsert_order_batch", {
                 "p_import_run_id": import_run_id,
@@ -2334,11 +2452,11 @@ class SupabaseDB(DBBase):
             rpc_err = str(e)
             print(f"[DB] upsert_order_batch RPC error: {rpc_err}")
             # RPC 실패 시 fallback: 개별 upsert (REST API)
-            result = self._upsert_order_batch_fallback(import_run_id, orders)
+            result = self._upsert_order_batch_fallback(import_run_id, orders, biz_id=biz_id)
             result["rpc_error"] = rpc_err
             return result
 
-    def _upsert_order_batch_fallback(self, import_run_id, orders):
+    def _upsert_order_batch_fallback(self, import_run_id, orders, *, biz_id=None):
         """RPC 실패 시 REST API 배치 upsert (최적화: 50건씩 배치 처리)."""
         inserted, updated, skipped, failed = 0, 0, 0, 0
         errors = []
@@ -2359,11 +2477,11 @@ class SupabaseDB(DBBase):
             existing_map = {}  # (channel, order_no, line_no) → {id, raw_hash, status}
             for ch, order_nos in by_channel.items():
                 try:
-                    res = self.client.table("order_transactions") \
+                    q = self.client.table("order_transactions") \
                         .select("id,channel,order_no,line_no,raw_hash,status") \
                         .eq("channel", ch) \
-                        .in_("order_no", list(order_nos)) \
-                        .execute()
+                        .in_("order_no", list(order_nos))
+                    res = self._with_biz(q, biz_id).execute()
                     for rec in (res.data or []):
                         key = (rec.get('channel', ''), rec.get('order_no', ''), rec.get('line_no', 1))
                         existing_map[key] = rec
@@ -2378,10 +2496,10 @@ class SupabaseDB(DBBase):
                 for hi in range(0, len(batch_hashes), 200):
                     h_chunk = batch_hashes[hi:hi + 200]
                     try:
-                        xres = self.client.table("order_transactions") \
+                        xq = self.client.table("order_transactions") \
                             .select("raw_hash,channel") \
-                            .in_("raw_hash", h_chunk) \
-                            .execute()
+                            .in_("raw_hash", h_chunk)
+                        xres = self._with_biz(xq, biz_id).execute()
                         for xr in (xres.data or []):
                             cross_channel_hashes[xr["raw_hash"]] = xr.get("channel", "")
                     except Exception:
@@ -2399,10 +2517,10 @@ class SupabaseDB(DBBase):
                 for oi in range(0, len(batch_order_nos), 200):
                     o_chunk = list(batch_order_nos)[oi:oi + 200]
                     try:
-                        xores = self.client.table("order_transactions") \
+                        xoq = self.client.table("order_transactions") \
                             .select("order_no,channel") \
-                            .in_("order_no", o_chunk) \
-                            .execute()
+                            .in_("order_no", o_chunk)
+                        xores = self._with_biz(xoq, biz_id).execute()
                         for xor in (xores.data or []):
                             xor_ono = xor.get("order_no", "")
                             xor_ch = xor.get("channel", "")
@@ -2527,10 +2645,20 @@ class SupabaseDB(DBBase):
             result["cross_channel_skipped"] = cross_skipped
         return result
 
-    def cancel_or_edit_order(self, order_id, change_type, payload, reason, user):
+    def cancel_or_edit_order(self, order_id, change_type, payload, reason, user, *, biz_id=None):
         """주문 수정/취소/환불 (RPC 호출).
         반환: {success, change_type, order_id} or {success: false, error}
         """
+        biz_id = self._resolve_biz_id(biz_id)
+        # biz 가드: 다른 사업자 주문은 거부
+        if biz_id is not None:
+            try:
+                chk = self.client.table("order_transactions").select("biz_id") \
+                    .eq("id", order_id).eq("biz_id", biz_id).limit(1).execute()
+                if not chk.data:
+                    return {"success": False, "error": "order not found or not authorized"}
+            except Exception:
+                pass
         try:
             res = self.client.rpc("rpc_cancel_or_edit_order", {
                 "p_order_id": order_id,
@@ -2544,10 +2672,12 @@ class SupabaseDB(DBBase):
             return {"success": False, "error": str(e)}
 
     def query_order_transactions(self, date_from=None, date_to=None, channel=None,
-                                  status=None, search=None, limit=100, offset=0):
+                                  status=None, search=None, limit=100, offset=0, *, biz_id=None):
         """주문 목록 조회 (필터 지원)."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("order_transactions").select(self.ORDER_LIST_COLUMNS)
+            q = self._with_biz(q, biz_id)
             if date_from:
                 q = q.gte("order_date", date_from)
             if date_to:
@@ -2565,30 +2695,34 @@ class SupabaseDB(DBBase):
         except Exception:
             return []
 
-    def query_order_transaction_by_id(self, order_id):
+    def query_order_transaction_by_id(self, order_id, *, biz_id=None):
         """주문 상세 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("order_transactions").select("*") \
-                .eq("id", order_id).execute()
+            q = self.client.table("order_transactions").select("*").eq("id", order_id)
+            res = self._with_biz(q, biz_id).execute()
             return res.data[0] if res.data else None
         except Exception:
             return None
 
-    def query_order_shipping(self, channel, order_no):
+    def query_order_shipping(self, channel, order_no, *, biz_id=None):
         """배송 정보 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("order_shipping").select("*") \
-                .eq("channel", channel).eq("order_no", order_no).execute()
+            q = self.client.table("order_shipping").select("*") \
+                .eq("channel", channel).eq("order_no", order_no)
+            res = self._with_biz(q, biz_id).execute()
             return res.data[0] if res.data else None
         except Exception:
             return None
 
-    def query_order_change_log(self, order_transaction_id):
+    def query_order_change_log(self, order_transaction_id, *, biz_id=None):
         """주문 변경 이력 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("order_change_log").select("*") \
-                .eq("order_transaction_id", order_transaction_id) \
-                .order("changed_at", desc=True).execute()
+            q = self.client.table("order_change_log").select("*") \
+                .eq("order_transaction_id", order_transaction_id)
+            res = self._with_biz(q, biz_id).order("changed_at", desc=True).execute()
             return res.data or []
         except Exception:
             return []
@@ -2626,15 +2760,17 @@ class SupabaseDB(DBBase):
             print(f"[DB] anonymize_expired_shipping error: {e}")
             return 0
 
-    def query_order_shipping_for_invoice(self, channel=None, date_from=None, date_to=None):
+    def query_order_shipping_for_invoice(self, channel=None, date_from=None, date_to=None, *, biz_id=None):
         """송장 생성용: 정상 주문의 배송정보 조회 (대기 상태만).
         order_transactions와 order_shipping 조인이 필요하므로
         transactions에서 대상 주문번호를 먼저 조회 후 shipping에서 검색.
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             # 1. 대상 거래 조회
             q = self.client.table("order_transactions") \
                 .select("channel,order_no,order_date,product_name,barcode,line_code,sort_order,qty,unit_price")
+            q = self._with_biz(q, biz_id)
             q = q.eq("status", "정상")
             if channel:
                 q = q.eq("channel", channel)
@@ -2656,6 +2792,7 @@ class SupabaseDB(DBBase):
                 sq = self.client.table("order_shipping").select("*") \
                     .eq("shipping_status", "대기") \
                     .in_("order_no", chunk)
+                sq = self._with_biz(sq, biz_id)
                 if channel:
                     sq = sq.eq("channel", channel)
                 ship_res = sq.execute()
@@ -2680,17 +2817,19 @@ class SupabaseDB(DBBase):
     # Phase 2: 출고/매출 자동처리
     # ================================================================
 
-    def query_pending_outbound_orders(self, date_from=None, date_to=None, channel=None):
+    def query_pending_outbound_orders(self, date_from=None, date_to=None, channel=None, *, biz_id=None):
         """미처리 주문 조회 (is_outbound_done=false, status='정상').
         collection_date 기준 필터 (stock_ledger/통합집계와 일관성 유지).
         collection_date가 NULL인 주문은 order_date로 fallback.
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             results = []
             # 1) collection_date가 있는 주문
             q = self.client.table("order_transactions").select("*") \
                 .eq("is_outbound_done", False).eq("status", "정상") \
                 .not_.is_("collection_date", "null")
+            q = self._with_biz(q, biz_id)
             if date_from:
                 q = q.gte("collection_date", date_from)
             if date_to:
@@ -2705,6 +2844,7 @@ class SupabaseDB(DBBase):
             q2 = self.client.table("order_transactions").select("*") \
                 .eq("is_outbound_done", False).eq("status", "정상") \
                 .is_("collection_date", "null")
+            q2 = self._with_biz(q2, biz_id)
             if date_from:
                 q2 = q2.gte("order_date", date_from)
             if date_to:
@@ -2720,20 +2860,22 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_pending_outbound_orders error: {e}")
             return []
 
-    def mark_orders_outbound_done(self, order_ids, outbound_date, revenue_category=None):
+    def mark_orders_outbound_done(self, order_ids, outbound_date, revenue_category=None, *, biz_id=None):
         """주문 출고 완료 표시."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             update_data = {"is_outbound_done": True, "outbound_date": outbound_date}
             if revenue_category:
                 update_data["revenue_category"] = revenue_category
             for chunk_start in range(0, len(order_ids), 50):
                 chunk = order_ids[chunk_start:chunk_start + 50]
-                self.client.table("order_transactions").update(update_data) \
-                    .in_("id", chunk).execute()
+                q = self.client.table("order_transactions").update(update_data) \
+                    .in_("id", chunk)
+                self._with_biz(q, biz_id).execute()
         except Exception as e:
             print(f"[DB] mark_orders_outbound_done error: {e}")
 
-    def query_outbound_summary(self, date_from=None, date_to=None):
+    def query_outbound_summary(self, date_from=None, date_to=None, *, biz_id=None):
         """출고 처리 현황 요약 — SQL RPC 우선, 실패 시 Python 폴백."""
         if not date_from:
             from datetime import datetime
@@ -2757,6 +2899,7 @@ class SupabaseDB(DBBase):
             print(f"[DB] RPC get_dashboard_outbound_summary 실패, 폴백: {e}")
 
         # 폴백: 기존 풀스캔
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             def build_pending(table):
                 q = self.client.table(table).select("id") \
@@ -2764,6 +2907,7 @@ class SupabaseDB(DBBase):
                     .gte("order_date", date_from)
                 if date_to:
                     q = q.lte("order_date", date_to)
+                q = self._with_biz(q, biz_id)
                 return q.order("id")
 
             def build_done(table):
@@ -2772,6 +2916,7 @@ class SupabaseDB(DBBase):
                     .gte("order_date", date_from)
                 if date_to:
                     q = q.lte("order_date", date_to)
+                q = self._with_biz(q, biz_id)
                 return q.order("id")
 
             pending = self._paginate_query("order_transactions", build_pending)
@@ -2788,24 +2933,28 @@ class SupabaseDB(DBBase):
     # Phase 3: 대시보드 쿼리
     # ================================================================
 
-    def count_orders_by_date(self, date_str):
+    def count_orders_by_date(self, date_str, *, biz_id=None):
         """특정 날짜의 주문 건수."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("order_transactions").select("id", count="exact") \
-                .eq("order_date", date_str).execute()
+            q = self.client.table("order_transactions").select("id", count="exact") \
+                .eq("order_date", date_str)
+            res = self._with_biz(q, biz_id).execute()
             return res.count if res.count is not None else len(res.data or [])
         except Exception:
             return 0
 
-    def sum_revenue_by_date(self, date_str):
+    def sum_revenue_by_date(self, date_str, *, biz_id=None):
         """특정 날짜의 매출 합계 (order_transactions 기반).
         Returns: dict {total_amount, settlement, commission, qty}
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("order_transactions") \
+            q = self.client.table("order_transactions") \
                 .select("total_amount,settlement,commission,qty") \
                 .eq("order_date", date_str) \
-                .eq("status", "정상").execute()
+                .eq("status", "정상")
+            res = self._with_biz(q, biz_id).execute()
             total_amount = sum(r.get("total_amount", 0) or 0 for r in (res.data or []))
             settlement = sum(r.get("settlement", 0) or 0 for r in (res.data or []))
             commission = sum(r.get("commission", 0) or 0 for r in (res.data or []))
@@ -2819,8 +2968,9 @@ class SupabaseDB(DBBase):
         except Exception:
             return {'total_amount': 0, 'settlement': 0, 'commission': 0, 'qty': 0}
 
-    def query_revenue_trend(self, days=7):
+    def query_revenue_trend(self, days=7, *, biz_id=None):
         """최근 N일 매출 추이 — SQL RPC 우선, 실패 시 Python 폴백."""
+        biz_id = self._resolve_biz_id(biz_id)
         # RPC 경로
         try:
             res = self.client.rpc('get_dashboard_revenue_trend', {
@@ -2849,12 +2999,12 @@ class SupabaseDB(DBBase):
             if ot_start <= today:
                 # 7일치 전체 조회 (3컬럼만, paginate + 재연결)
                 def ot_builder(table):
-                    return self.client.table(table).select(
+                    q = self.client.table(table).select(
                         "order_date,total_amount,settlement"
                     ).gte("order_date", ot_start) \
                      .lte("order_date", today) \
-                     .eq("status", "정상") \
-                     .order("order_date")
+                     .eq("status", "정상")
+                    return self._with_biz(q, biz_id).order("order_date")
 
                 ot_rows = self._paginate_query("order_transactions", ot_builder)
 
@@ -2876,12 +3026,12 @@ class SupabaseDB(DBBase):
                 legacy_end = (cutoff_dt - timedelta(days=1)).strftime('%Y-%m-%d')
 
                 def builder(table):
-                    return self.client.table(table).select(
+                    q = self.client.table(table).select(
                         'revenue_date,category,revenue'
                     ).or_("is_deleted.is.null,is_deleted.eq.false") \
                      .gte('revenue_date', date_from) \
-                     .lte('revenue_date', legacy_end) \
-                     .order('revenue_date')
+                     .lte('revenue_date', legacy_end)
+                    return self._with_biz(q, biz_id).order('revenue_date')
 
                 rows = self._paginate_query('daily_revenue', builder)
                 for r in rows:
@@ -3128,11 +3278,13 @@ class SupabaseDB(DBBase):
     # 실시간 주문처리: 추가 메서드
     # ================================================================
 
-    def query_orders_by_import_run(self, import_run_id, outbound_done=None):
+    def query_orders_by_import_run(self, import_run_id, outbound_done=None, *, biz_id=None):
         """특정 import_run에 속한 주문 조회 (실시간 처리용)."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("order_transactions").select("*") \
                 .eq("import_run_id", import_run_id).eq("status", "정상")
+            q = self._with_biz(q, biz_id)
             if outbound_done is not None:
                 q = q.eq("is_outbound_done", outbound_done)
             q = q.order("id")
@@ -3142,20 +3294,22 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_orders_by_import_run error: {e}")
             return []
 
-    def get_import_run_impact(self, run_id):
+    def get_import_run_impact(self, run_id, *, biz_id=None):
         """import_run 취소 시 영향 범위 미리보기.
         반환: {run: {...}, order_count, outbound_count, cancelled_count, error}
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             # import_run 정보
-            run = self.query_import_run_by_id(run_id)
+            run = self.query_import_run_by_id(run_id, biz_id=biz_id)
             if not run:
                 return {"error": "import_run을 찾을 수 없습니다."}
 
             # 해당 run_id의 order_transactions 전체 (상태 무관)
-            all_orders = self.client.table("order_transactions") \
+            q = self.client.table("order_transactions") \
                 .select("id,status,is_outbound_done") \
-                .eq("import_run_id", run_id).execute()
+                .eq("import_run_id", run_id)
+            all_orders = self._with_biz(q, biz_id).execute()
             all_list = all_orders.data or []
 
             total_count = len(all_list)
@@ -3175,25 +3329,27 @@ class SupabaseDB(DBBase):
             print(f"[DB] get_import_run_impact error: {e}")
             return {"error": str(e)}
 
-    def cancel_import_run(self, run_id, cancelled_by):
+    def cancel_import_run(self, run_id, cancelled_by, *, biz_id=None):
         """import_run 단위 롤백: run status → cancelled, 정상 주문 → 취소 처리.
         출고 처리된 주문은 건너뛰고, 미출고 정상 주문만 취소.
         반환: {cancelled_orders, skipped_outbound, error}
         """
         from datetime import datetime, timezone
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             # 1) import_run 상태 확인
-            run = self.query_import_run_by_id(run_id)
+            run = self.query_import_run_by_id(run_id, biz_id=biz_id)
             if not run:
                 return {"error": "import_run을 찾을 수 없습니다."}
             if run.get("status") == "cancelled":
                 return {"error": "이미 취소된 import_run입니다."}
 
             # 2) 해당 run의 정상 주문 조회
-            res = self.client.table("order_transactions") \
+            q = self.client.table("order_transactions") \
                 .select("id,is_outbound_done,order_no,channel,product_name,qty") \
                 .eq("import_run_id", run_id) \
-                .eq("status", "정상").execute()
+                .eq("status", "정상")
+            res = self._with_biz(q, biz_id).execute()
             active_orders = res.data or []
 
             cancelled_orders = 0
@@ -3207,15 +3363,16 @@ class SupabaseDB(DBBase):
                     continue
 
                 # 주문 상태 → 취소
-                self.client.table("order_transactions").update({
+                uq = self.client.table("order_transactions").update({
                     "status": "취소",
                     "status_reason": f"import_run 일괄취소 (run_id={run_id})",
                     "updated_at": now_iso,
-                }).eq("id", order["id"]).execute()
+                }).eq("id", order["id"])
+                self._with_biz(uq, biz_id).execute()
 
                 # 변경 이력 기록 (order_change_log)
                 try:
-                    self.client.table("order_change_log").insert({
+                    log_payload = {
                         "order_transaction_id": order["id"],
                         "change_type": "status_change",
                         "field_name": "status",
@@ -3223,7 +3380,9 @@ class SupabaseDB(DBBase):
                         "after_value": "취소",
                         "change_reason": f"import_run 일괄취소 (run_id={run_id})",
                         "changed_by": cancelled_by,
-                    }).execute()
+                    }
+                    self._inject_biz_id(log_payload, biz_id)
+                    self.client.table("order_change_log").insert(log_payload).execute()
                 except Exception:
                     pass  # change_log 실패해도 취소는 계속 진행
 
@@ -3238,7 +3397,7 @@ class SupabaseDB(DBBase):
                 "status": new_status,
                 "cancelled_by": cancelled_by,
                 "cancelled_at": now_iso,
-            })
+            }, biz_id=biz_id)
 
             return {
                 "cancelled_orders": cancelled_orders,
@@ -3249,7 +3408,7 @@ class SupabaseDB(DBBase):
             import traceback; traceback.print_exc()
             return {"error": str(e)}
 
-    def rollback_import_run_full(self, run_id, cancelled_by):
+    def rollback_import_run_full(self, run_id, cancelled_by, *, biz_id=None):
         """import_run 전체 롤백: 재고(stock_ledger) 복원 + 주문 취소 + run 상태 변경.
 
         API 주문수집 실패 시 원상복구용. 순서:
@@ -3257,13 +3416,15 @@ class SupabaseDB(DBBase):
         2) cancel_import_run으로 미출고 주문 취소
         """
         from datetime import datetime, timezone
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             # 1) 해당 run의 출고 완료 주문 조회
-            res = self.client.table("order_transactions") \
+            q = self.client.table("order_transactions") \
                 .select("id,order_no,channel,product_name,qty,outbound_date,is_outbound_done") \
                 .eq("import_run_id", run_id) \
                 .eq("status", "정상") \
-                .eq("is_outbound_done", True).execute()
+                .eq("is_outbound_done", True)
+            res = self._with_biz(q, biz_id).execute()
             outbound_orders = res.data or []
 
             stock_restored = 0
@@ -3271,25 +3432,27 @@ class SupabaseDB(DBBase):
                 oid = order["id"]
                 # stock_ledger에서 event_uid에 order_id가 포함된 SALES_OUT 삭제
                 try:
-                    sl_res = self.client.table("stock_ledger") \
+                    slq = self.client.table("stock_ledger") \
                         .select("id") \
                         .eq("type", "SALES_OUT") \
-                        .like("event_uid", f"%{oid}%").execute()
+                        .like("event_uid", f"%{oid}%")
+                    sl_res = self._with_biz(slq, biz_id).execute()
                     sl_ids = [r["id"] for r in (sl_res.data or [])]
                     for sl_id in sl_ids:
                         # 하드 삭제 → 소프트 삭제로 변경 (데이터 보존)
-                        self.client.table("stock_ledger").update(
+                        uq = self.client.table("stock_ledger").update(
                             {"is_deleted": True, "status": "cancelled"}
-                        ).eq("id", sl_id).execute()
+                        ).eq("id", sl_id)
+                        self._with_biz(uq, biz_id).execute()
                         stock_restored += 1
                 except Exception:
                     pass
 
                 # is_outbound_done 리셋
-                self.reset_order_outbound(oid)
+                self.reset_order_outbound(oid, biz_id=biz_id)
 
             # 2) 나머지 미출고 주문 취소 + run 상태 변경
-            cancel_result = self.cancel_import_run(run_id, cancelled_by)
+            cancel_result = self.cancel_import_run(run_id, cancelled_by, biz_id=biz_id)
             cancel_result['stock_ledger_deleted'] = stock_restored
             cancel_result['outbound_reset'] = len(outbound_orders)
             return cancel_result
@@ -3310,7 +3473,7 @@ class SupabaseDB(DBBase):
         except Exception as e:
             print(f"[DB] reset_order_outbound error: {e}")
 
-    def search_order_shipping(self, keyword, field='all'):
+    def search_order_shipping(self, keyword, field='all', *, biz_id=None):
         """order_shipping 검색 (송장번호/수취인명).
         송장번호는 하이픈 유무와 관계없이 매칭.
 
@@ -3320,6 +3483,7 @@ class SupabaseDB(DBBase):
 
         Returns: list of {channel, order_no, name, phone, invoice_no, ...}
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             def _invoice_search(kw):
                 """송장번호 검색 — 하이픈 유무 모두 시도"""
@@ -3327,8 +3491,8 @@ class SupabaseDB(DBBase):
                 # 1차: 원본 키워드로 검색
                 q = self.client.table("order_shipping").select("*") \
                     .eq("is_anonymized", False) \
-                    .ilike("invoice_no", f"%{kw}%") \
-                    .order("created_at", desc=True).limit(100)
+                    .ilike("invoice_no", f"%{kw}%")
+                q = self._with_biz(q, biz_id).order("created_at", desc=True).limit(100)
                 results = (q.execute()).data or []
                 if results:
                     return results
@@ -3336,8 +3500,8 @@ class SupabaseDB(DBBase):
                 if kw_clean != kw:
                     q2 = self.client.table("order_shipping").select("*") \
                         .eq("is_anonymized", False) \
-                        .ilike("invoice_no", f"%{kw_clean}%") \
-                        .order("created_at", desc=True).limit(100)
+                        .ilike("invoice_no", f"%{kw_clean}%")
+                    q2 = self._with_biz(q2, biz_id).order("created_at", desc=True).limit(100)
                     results = (q2.execute()).data or []
                     if results:
                         return results
@@ -3346,8 +3510,8 @@ class SupabaseDB(DBBase):
                     kw_fmt = f"{kw_clean[:4]}-{kw_clean[4:8]}-{kw_clean[8:]}"
                     q3 = self.client.table("order_shipping").select("*") \
                         .eq("is_anonymized", False) \
-                        .ilike("invoice_no", f"%{kw_fmt}%") \
-                        .order("created_at", desc=True).limit(100)
+                        .ilike("invoice_no", f"%{kw_fmt}%")
+                    q3 = self._with_biz(q3, biz_id).order("created_at", desc=True).limit(100)
                     results = (q3.execute()).data or []
                 return results
 
@@ -3357,6 +3521,7 @@ class SupabaseDB(DBBase):
                 q = self.client.table("order_shipping").select("*") \
                     .eq("is_anonymized", False) \
                     .ilike("name", f"%{keyword}%")
+                q = self._with_biz(q, biz_id)
             else:
                 # 'all': 이름 검색 + 송장 검색 합산
                 invoice_results = _invoice_search(keyword)
@@ -3383,22 +3548,24 @@ class SupabaseDB(DBBase):
 
     def update_order_shipping_invoice(self, channel, order_no,
                                        invoice_no, courier=None,
-                                       shipping_status=None):
+                                       shipping_status=None, *, biz_id=None):
         """order_shipping 송장번호 업데이트."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             update = {"invoice_no": invoice_no}
             if courier:
                 update["courier"] = courier
             if shipping_status:
                 update["shipping_status"] = shipping_status
-            self.client.table("order_shipping").update(update) \
-                .eq("channel", channel).eq("order_no", order_no).execute()
+            q = self.client.table("order_shipping").update(update) \
+                .eq("channel", channel).eq("order_no", order_no)
+            self._with_biz(q, biz_id).execute()
             return True
         except Exception as e:
             print(f"[DB] update_order_shipping_invoice error: {e}")
             return False
 
-    def bulk_update_shipping_invoices(self, updates):
+    def bulk_update_shipping_invoices(self, updates, *, biz_id=None):
         """송장번호 일괄 업데이트.
 
         Args:
@@ -3406,16 +3573,18 @@ class SupabaseDB(DBBase):
         Returns:
             int: 업데이트 건수
         """
+        biz_id = self._resolve_biz_id(biz_id)
         count = 0
         for u in updates:
             if self.update_order_shipping_invoice(
                 u['channel'], u['order_no'],
-                u['invoice_no'], u.get('courier')
+                u['invoice_no'], u.get('courier'),
+                biz_id=biz_id
             ):
                 count += 1
         return count
 
-    def query_pending_invoice_push(self, channel=None, date_from=None, date_to=None):
+    def query_pending_invoice_push(self, channel=None, date_from=None, date_to=None, *, biz_id=None):
         """송장 push 대기건 조회: order_shipping (invoice_no 있음 + shipping_status='대기')
         + api_orders (api_order_id, api_line_id, raw_data) 매핑.
 
@@ -3423,12 +3592,14 @@ class SupabaseDB(DBBase):
             [{channel, order_no, invoice_no, courier,
               api_order_id, api_line_id, raw_data}, ...]
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             # 1. order_shipping: 송장번호 있고 대기 상태
             q = self.client.table("order_shipping") \
                 .select("channel,order_no,invoice_no,courier")
             q = q.eq("shipping_status", "대기") \
                 .neq("invoice_no", "").not_.is_("invoice_no", "null")
+            q = self._with_biz(q, biz_id)
             if channel:
                 q = q.eq("channel", channel)
             ship_res = q.order("created_at", desc=True).limit(500).execute()
@@ -3449,6 +3620,7 @@ class SupabaseDB(DBBase):
                 aq = self.client.table("api_orders") \
                     .select("channel,api_order_id,api_line_id,raw_data") \
                     .in_("api_order_id", chunk)
+                aq = self._with_biz(aq, biz_id)
                 if channel:
                     aq = aq.eq("channel", channel)
                 api_res = aq.execute()
@@ -3465,6 +3637,7 @@ class SupabaseDB(DBBase):
                     aq2 = self.client.table("api_orders") \
                         .select("channel,api_order_id,api_line_id,raw_data") \
                         .in_("api_line_id", unmapped)
+                    aq2 = self._with_biz(aq2, biz_id)
                     if channel:
                         aq2 = aq2.eq("channel", channel)
                     api_res2 = aq2.execute()
@@ -3509,7 +3682,7 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_pending_invoice_push error: {e}")
             return []
 
-    def bulk_update_shipping_status(self, updates):
+    def bulk_update_shipping_status(self, updates, *, biz_id=None):
         """shipping_status 일괄 업데이트.
 
         Args:
@@ -3517,18 +3690,20 @@ class SupabaseDB(DBBase):
         Returns:
             int: 업데이트 건수
         """
+        biz_id = self._resolve_biz_id(biz_id)
         count = 0
         for u in updates:
             try:
-                self.client.table("order_shipping").update({
+                q = self.client.table("order_shipping").update({
                     "shipping_status": u['shipping_status'],
-                }).eq("channel", u['channel']).eq("order_no", u['order_no']).execute()
+                }).eq("channel", u['channel']).eq("order_no", u['order_no'])
+                self._with_biz(q, biz_id).execute()
                 count += 1
             except Exception as e:
                 print(f"[DB] bulk_update_shipping_status error: {u} → {e}")
         return count
 
-    def query_shipped_orders_for_tracking(self, channel=None, limit=200):
+    def query_shipped_orders_for_tracking(self, channel=None, limit=200, *, biz_id=None):
         """배송 추적 대상 조회: 발송완료 but 배송완료/구매확정 아닌 건.
 
         order_shipping + api_orders 조인하여 api_order_id 포함.
@@ -3536,10 +3711,12 @@ class SupabaseDB(DBBase):
         Returns:
             [{channel, order_no, api_order_id, delivery_status, shipping_status}]
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("order_shipping") \
                 .select("channel,order_no,shipping_status,delivery_status")
             q = q.eq("shipping_status", "발송")
+            q = self._with_biz(q, biz_id)
             if channel:
                 q = q.eq("channel", channel)
 
@@ -3564,6 +3741,7 @@ class SupabaseDB(DBBase):
                 aq = self.client.table("api_orders") \
                     .select("channel,api_order_id,api_line_id") \
                     .in_("api_order_id", chunk)
+                aq = self._with_biz(aq, biz_id)
                 if channel:
                     aq = aq.eq("channel", channel)
                 api_res = aq.execute()
@@ -3577,6 +3755,7 @@ class SupabaseDB(DBBase):
                     aq2 = self.client.table("api_orders") \
                         .select("channel,api_order_id,api_line_id") \
                         .in_("api_line_id", unmapped)
+                    aq2 = self._with_biz(aq2, biz_id)
                     if channel:
                         aq2 = aq2.eq("channel", channel)
                     api_res2 = aq2.execute()
@@ -3604,7 +3783,7 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_shipped_orders_for_tracking error: {e}")
             return []
 
-    def bulk_update_delivery_status(self, updates):
+    def bulk_update_delivery_status(self, updates, *, biz_id=None):
         """배송 상태 일괄 갱신.
 
         Args:
@@ -3613,29 +3792,33 @@ class SupabaseDB(DBBase):
         Returns:
             int: 업데이트 건수
         """
+        biz_id = self._resolve_biz_id(biz_id)
         count = 0
         for u in updates:
             try:
-                self.client.table("order_shipping").update({
+                q = self.client.table("order_shipping").update({
                     "delivery_status": u['delivery_status'],
                     "delivery_status_raw": u.get('delivery_status_raw', ''),
                     "delivery_status_updated_at": u.get('delivery_status_updated_at'),
-                }).eq("channel", u['channel']).eq("order_no", u['order_no']).execute()
+                }).eq("channel", u['channel']).eq("order_no", u['order_no'])
+                self._with_biz(q, biz_id).execute()
                 count += 1
             except Exception as e:
                 print(f"[DB] bulk_update_delivery_status error: {u} → {e}")
         return count
 
-    def query_delivery_status_summary(self, channel=None):
+    def query_delivery_status_summary(self, channel=None, *, biz_id=None):
         """배송 상태별 건수 집계.
 
         Returns:
             {channel: {status: count, ...}, ...}
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("order_shipping") \
                 .select("channel, delivery_status, shipping_status")
             q = q.or_("shipping_status.eq.대기,shipping_status.eq.발송")
+            q = self._with_biz(q, biz_id)
             if channel:
                 q = q.eq("channel", channel)
             res = q.limit(10000).execute()
@@ -3653,10 +3836,11 @@ class SupabaseDB(DBBase):
             return {}
 
     def _batch_query_orders_by_keys(self, order_keys, date_from=None, date_to=None,
-                                      channel_filter=None, status=None, limit=200):
+                                      channel_filter=None, status=None, limit=200, *, biz_id=None):
         """(channel, order_no) 쌍 목록으로 order_transactions 배치 조회.
         채널별 .in_() 사용하여 N+1 제거.
         """
+        biz_id = self._resolve_biz_id(biz_id)
         by_channel = {}
         for ch, ono in order_keys:
             by_channel.setdefault(ch, set()).add(ono)
@@ -3671,6 +3855,7 @@ class SupabaseDB(DBBase):
                     q = self.client.table("order_transactions") \
                         .select(self.ORDER_LIST_COLUMNS) \
                         .eq("channel", ch).in_("order_no", batch_nos)
+                    q = self._with_biz(q, biz_id)
                     if date_from:
                         q = q.gte("order_date", date_from)
                     if date_to:
@@ -3689,30 +3874,32 @@ class SupabaseDB(DBBase):
                                            channel=None, status=None,
                                            outbound=None,
                                            search=None, search_field=None,
-                                           limit=100, offset=0):
+                                           limit=100, offset=0, *, biz_id=None):
         """주문 확장 검색 (송장번호/수취인명 검색 포함).
         최적화: 채널별 배치 .in_() 조회 (N+1 제거).
         raw_data/raw_hash 제외하여 대용량 날짜범위에서도 타임아웃 방지.
 
         search_field: 'all'(기본), 'order_no', 'product', 'invoice', 'recipient'
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             # 송장번호/수취인명 검색 → order_shipping에서 order_no 매칭
             if search and search_field in ('invoice', 'recipient'):
                 sf = 'invoice' if search_field == 'invoice' else 'name'
-                shipping = self.search_order_shipping(search, field=sf)
+                shipping = self.search_order_shipping(search, field=sf, biz_id=biz_id)
                 if not shipping:
                     return []
                 order_keys = [(s['channel'], s['order_no']) for s in shipping]
                 results = self._batch_query_orders_by_keys(
-                    order_keys[:200], date_from, date_to, channel, status, limit
+                    order_keys[:200], date_from, date_to, channel, status, limit, biz_id=biz_id
                 )
                 if results:
-                    self._merge_invoice_no(results)
+                    self._merge_invoice_no(results, biz_id=biz_id)
                 return results
 
             # 기본 검색 (기존 로직 확장)
             q = self.client.table("order_transactions").select(self.ORDER_LIST_COLUMNS)
+            q = self._with_biz(q, biz_id)
             if date_from:
                 q = q.gte("order_date", date_from)
             if date_to:
@@ -3743,12 +3930,12 @@ class SupabaseDB(DBBase):
             # "전체" 검색이면 수취인명 검색 결과도 병합 (배치 조회)
             if search and search_field in ('all', '', None):
                 try:
-                    shipping = self.search_order_shipping(search, field='name')
+                    shipping = self.search_order_shipping(search, field='name', biz_id=biz_id)
                     if shipping:
                         existing_ids = {r['id'] for r in results}
                         order_keys = [(s['channel'], s['order_no']) for s in shipping]
                         extra = self._batch_query_orders_by_keys(
-                            order_keys[:100], date_from, date_to, channel, status, limit
+                            order_keys[:100], date_from, date_to, channel, status, limit, biz_id=biz_id
                         )
                         for row in extra:
                             if row['id'] not in existing_ids:
@@ -3761,7 +3948,7 @@ class SupabaseDB(DBBase):
 
             # 결과에 invoice_no 병합 (order_shipping 조인)
             if results:
-                self._merge_invoice_no(results)
+                self._merge_invoice_no(results, biz_id=biz_id)
             return results
         except Exception as e:
             import traceback
@@ -3770,10 +3957,11 @@ class SupabaseDB(DBBase):
             traceback.print_exc()
             return []
 
-    def _merge_invoice_no(self, orders):
+    def _merge_invoice_no(self, orders, *, biz_id=None):
         """주문 목록에 order_shipping + packing_jobs 정보 병합 (in-place).
         최적화: 채널별 order_no 배치 .in_() 조회 (N+1 제거).
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             keys = list({(o.get('channel', ''), o.get('order_no', '')) for o in orders})
             shipping_map = {}  # (channel, order_no) → {invoice_no, courier, name, shipping_status}
@@ -3788,11 +3976,11 @@ class SupabaseDB(DBBase):
                 for i in range(0, len(order_nos), 200):
                     batch_nos = order_nos[i:i+200]
                     try:
-                        res = self.client.table("order_shipping") \
+                        sq = self.client.table("order_shipping") \
                             .select("channel,order_no,invoice_no,courier,name,shipping_status") \
                             .eq("channel", ch) \
-                            .in_("order_no", batch_nos) \
-                            .execute()
+                            .in_("order_no", batch_nos)
+                        res = self._with_biz(sq, biz_id).execute()
                         for s in (res.data or []):
                             shipping_map[(s.get('channel', ''), s.get('order_no', ''))] = {
                                 'invoice_no': s.get('invoice_no', ''),
@@ -3810,11 +3998,11 @@ class SupabaseDB(DBBase):
                 for i in range(0, len(all_order_nos), 200):
                     batch = all_order_nos[i:i+200]
                     try:
-                        pj = self.client.table("packing_jobs") \
+                        pjq = self.client.table("packing_jobs") \
                             .select("order_no,status,completed_at") \
                             .in_("order_no", batch) \
-                            .eq("status", "completed") \
-                            .execute()
+                            .eq("status", "completed")
+                        pj = self._with_biz(pjq, biz_id).execute()
                         for p in (pj.data or []):
                             ono = p.get('order_no', '')
                             if ono:
@@ -3850,8 +4038,9 @@ class SupabaseDB(DBBase):
 
     # ── Packing Jobs ──────────────────────────────────────
 
-    def insert_packing_job(self, payload):
+    def insert_packing_job(self, payload, *, biz_id=None):
         """패킹 작업 생성."""
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         try:
             res = self.client.table("packing_jobs").insert(payload).execute()
             return res.data[0] if res.data else None
@@ -3859,11 +4048,12 @@ class SupabaseDB(DBBase):
             print(f"[DB] insert_packing_job error: {e}")
             return None
 
-    def get_packing_job(self, job_id):
+    def get_packing_job(self, job_id, *, biz_id=None):
         """패킹 작업 단건 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("packing_jobs").select("*") \
-                .eq("id", job_id).execute()
+            q = self.client.table("packing_jobs").select("*").eq("id", job_id)
+            res = self._with_biz(q, biz_id).execute()
             return res.data[0] if res.data else None
         except Exception as e:
             print(f"[DB] get_packing_job error: {e}")
@@ -3880,11 +4070,13 @@ class SupabaseDB(DBBase):
             return False
 
     def query_packing_jobs(self, user_id=None, date_from=None, date_to=None,
-                           search=None, limit=20, offset=0):
+                           search=None, limit=20, offset=0, *, biz_id=None):
         """패킹 작업 목록 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("packing_jobs").select("*") \
                 .eq("status", "completed")
+            q = self._with_biz(q, biz_id)
             if user_id:
                 q = q.eq("user_id", user_id)
             if date_from:
@@ -3906,11 +4098,13 @@ class SupabaseDB(DBBase):
             return []
 
     def count_packing_jobs(self, user_id=None, date_from=None, date_to=None,
-                           search=None):
+                           search=None, *, biz_id=None):
         """패킹 작업 건수."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("packing_jobs").select("id", count="exact") \
                 .eq("status", "completed")
+            q = self._with_biz(q, biz_id)
             if user_id:
                 q = q.eq("user_id", user_id)
             if date_from:
@@ -4076,11 +4270,13 @@ class SupabaseDB(DBBase):
     # ── expenses (간접비/비용 관리) ──
 
     def query_expenses(self, month=None, category=None,
-                        date_from=None, date_to=None):
+                        date_from=None, date_to=None, *, biz_id=None):
         """비용 목록 조회. month 또는 date_from/date_to 기간 필터, category 필터."""
+        biz_id = self._resolve_biz_id(biz_id)
         def builder(table):
             q = self.client.table(table).select("*")
             q = q.or_("is_deleted.is.null,is_deleted.eq.false")
+            q = self._with_biz(q, biz_id)
             if date_from and date_to:
                 q = q.gte("expense_date", date_from).lte("expense_date", date_to)
             elif date_from:
@@ -4098,8 +4294,9 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_expenses error: {e}")
             return []
 
-    def insert_expense(self, data):
+    def insert_expense(self, data, *, biz_id=None):
         """비용 1건 등록. data: {expense_date, expense_month, category, ...}."""
+        self._inject_biz_id(data, self._resolve_biz_id(biz_id))
         res = self.client.table("expenses").insert(data).execute()
         return res.data[0] if res.data else None
 
@@ -4180,10 +4377,12 @@ class SupabaseDB(DBBase):
 
     # ── employees (직원 관리) ──
 
-    def query_employees(self, status=None):
+    def query_employees(self, status=None, *, biz_id=None):
         """직원 목록 조회. status='재직'/'퇴직' 필터 가능."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("employees").select("*").or_("is_deleted.is.null,is_deleted.eq.false")
+            q = self._with_biz(q, biz_id)
             if status:
                 q = q.eq("status", status)
             q = q.order("name")
@@ -4193,8 +4392,9 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_employees error: {e}")
             return []
 
-    def insert_employee(self, data):
+    def insert_employee(self, data, *, biz_id=None):
         """직원 1명 등록."""
+        self._inject_biz_id(data, self._resolve_biz_id(biz_id))
         res = self.client.table("employees").insert(data).execute()
         return res.data[0] if res.data else None
 
@@ -4213,10 +4413,12 @@ class SupabaseDB(DBBase):
 
     # ── payroll_monthly (급여 관리) ──
 
-    def query_payroll(self, pay_month=None):
+    def query_payroll(self, pay_month=None, *, biz_id=None):
         """급여 목록 조회. pay_month='2026-03' 필터."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("payroll_monthly").select("*")
+            q = self._with_biz(q, biz_id)
             if pay_month:
                 q = q.eq("pay_month", pay_month)
             q = q.order("employee_id")
@@ -4226,8 +4428,9 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_payroll error: {e}")
             return []
 
-    def insert_payroll(self, data):
+    def insert_payroll(self, data, *, biz_id=None):
         """급여 1건 등록."""
+        self._inject_biz_id(data, self._resolve_biz_id(biz_id))
         res = self.client.table("payroll_monthly").insert(data).execute()
         return res.data[0] if res.data else None
 
@@ -5635,10 +5838,12 @@ class SupabaseDB(DBBase):
 
     # ── marketplace_api_config ──
 
-    def query_marketplace_api_configs(self, channel=None):
+    def query_marketplace_api_configs(self, channel=None, *, biz_id=None):
         """마켓플레이스 API 설정 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("marketplace_api_config").select("*")
+            q = self._with_biz(q, biz_id)
             if channel:
                 q = q.eq("channel", channel)
             res = q.execute()
@@ -5647,11 +5852,12 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_marketplace_api_configs error: {e}")
             return []
 
-    def upsert_marketplace_api_config(self, payload):
+    def upsert_marketplace_api_config(self, payload, *, biz_id=None):
         """마켓플레이스 API 설정 upsert."""
         try:
             from datetime import datetime, timezone
             payload['updated_at'] = datetime.now(timezone.utc).isoformat()
+            self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
             self.client.table("marketplace_api_config").upsert(
                 payload, on_conflict="channel"
             ).execute()
@@ -5660,8 +5866,9 @@ class SupabaseDB(DBBase):
 
     # ── api_sync_log ──
 
-    def insert_api_sync_log(self, payload):
+    def insert_api_sync_log(self, payload, *, biz_id=None):
         """API 동기화 로그 생성. Returns: 생성된 row (id 포함)."""
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         try:
             res = self.client.table("api_sync_log").insert(payload).execute()
             return res.data[0] if res.data else None
@@ -5677,11 +5884,13 @@ class SupabaseDB(DBBase):
         except Exception as e:
             print(f"[DB] update_api_sync_log error: {e}")
 
-    def query_api_sync_logs(self, channel=None, limit=50):
+    def query_api_sync_logs(self, channel=None, limit=50, *, biz_id=None):
         """API 동기화 로그 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("api_sync_log") \
                 .select("*").order("started_at", desc=True).limit(limit)
+            q = self._with_biz(q, biz_id)
             if channel:
                 q = q.eq("channel", channel)
             res = q.execute()
@@ -5692,9 +5901,10 @@ class SupabaseDB(DBBase):
 
     # ── work_logs (작업 이력) ──
 
-    def insert_work_log(self, payload):
+    def insert_work_log(self, payload, *, biz_id=None):
         """작업 이력 기록. Returns: 생성된 row (id 포함) or None."""
         import json as _json
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         try:
             for key in ('meta',):
                 if key in payload and payload[key] is not None:
@@ -5773,13 +5983,16 @@ class SupabaseDB(DBBase):
 
     # ── api_orders ──
 
-    def upsert_api_orders_batch(self, orders):
+    def upsert_api_orders_batch(self, orders, *, biz_id=None):
         """API 주문 배치 upsert. Returns: {new, updated, skipped}."""
         # ★ 마켓 API → api_orders 저장 choke point — canonical 통일
         from services.product_name import canonical
+        biz_id = self._resolve_biz_id(biz_id)
         for o in orders or []:
             if isinstance(o, dict) and o.get('product_name'):
                 o['product_name'] = canonical(o['product_name'])
+            if isinstance(o, dict) and biz_id is not None:
+                o.setdefault('biz_id', biz_id)
         new = 0
         updated = 0
         skipped = 0
@@ -5800,6 +6013,7 @@ class SupabaseDB(DBBase):
                     q = self.client.table("api_orders") \
                         .select("channel,api_order_id,api_line_id") \
                         .eq("channel", ch)
+                    q = self._with_biz(q, biz_id)
                     if date_min:
                         q = q.gte("order_date", date_min)
                     if date_max:
@@ -5844,12 +6058,13 @@ class SupabaseDB(DBBase):
         return {'new': new, 'updated': updated, 'skipped': skipped}
 
     def query_api_orders(self, channel=None, date_from=None, date_to=None,
-                         match_status=None, limit=50000, columns=None):
+                         match_status=None, limit=50000, columns=None, *, biz_id=None):
         """API 주문 조회 (페이지네이션으로 Supabase 1000행 제한 우회).
 
         Args:
             columns: 조회할 컬럼 목록 (None이면 전체). 예: "channel,order_date,total_amount"
         """
+        biz_id = self._resolve_biz_id(biz_id)
         all_rows = []
         page_size = 1000
         offset = 0
@@ -5863,6 +6078,7 @@ class SupabaseDB(DBBase):
                     q = self.client.table("api_orders") \
                         .select(select_cols).order("order_date", desc=True) \
                         .range(offset, offset + page_size - 1)
+                    q = self._with_biz(q, biz_id)
                     if channel:
                         q = q.eq("channel", channel)
                     if date_from:
@@ -5901,7 +6117,7 @@ class SupabaseDB(DBBase):
         except Exception as e:
             print(f"[DB] update_api_order_match error: {e}")
 
-    def update_api_order_fee(self, channel, api_order_id, api_line_id, fee_data):
+    def update_api_order_fee(self, channel, api_order_id, api_line_id, fee_data, *, biz_id=None):
         """API 주문의 수수료/정산 데이터 업데이트 (revenue-history 연동).
 
         Args:
@@ -5910,20 +6126,22 @@ class SupabaseDB(DBBase):
             api_line_id: 상품주문번호 (vendorItemId)
             fee_data: {commission, settlement_amount, fee_detail}
         """
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            self.client.table("api_orders") \
+            q = self.client.table("api_orders") \
                 .update(fee_data) \
                 .eq("channel", channel) \
                 .eq("api_order_id", api_order_id) \
-                .eq("api_line_id", api_line_id) \
-                .execute()
+                .eq("api_line_id", api_line_id)
+            self._with_biz(q, biz_id).execute()
         except Exception as e:
             print(f"[DB] update_api_order_fee error: {e}")
 
     # ── api_settlements ──
 
-    def upsert_api_settlements_batch(self, settlements):
+    def upsert_api_settlements_batch(self, settlements, *, biz_id=None):
         """API 정산 배치 upsert."""
+        self._inject_biz_id(settlements, self._resolve_biz_id(biz_id))
         batch_size = 50
         for i in range(0, len(settlements), batch_size):
             batch = settlements[i:i + batch_size]
@@ -5935,12 +6153,14 @@ class SupabaseDB(DBBase):
                 print(f"[DB] upsert_api_settlements_batch error: {e}")
 
     def query_api_settlements(self, channel=None, date_from=None, date_to=None,
-                              limit=1000):
+                              limit=1000, *, biz_id=None):
         """API 정산 조회."""
+        biz_id = self._resolve_biz_id(biz_id)
         for attempt in range(3):
             try:
                 q = self.client.table("api_settlements") \
                     .select("*").order("settlement_date", desc=True).limit(limit)
+                q = self._with_biz(q, biz_id)
                 if channel:
                     q = q.eq("channel", channel)
                 if date_from:

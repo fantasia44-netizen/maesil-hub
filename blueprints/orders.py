@@ -1557,7 +1557,9 @@ def api_rocket_add_product():
     if not price or price <= 0:
         return jsonify({'success': False, 'error': '판매가를 입력하세요.'})
 
-    name_norm = name.replace(' ', '').replace('\u3000', '')
+    from services.product_name import canonical
+    name = canonical(name)
+    name_norm = name  # canonical applied
     db = get_db()
     try:
         # products 테이블: 정규화 이름 → 정확한 이름 순으로 기존 상품 조회
@@ -1970,7 +1972,9 @@ def api_products_add():
     if not name:
         return jsonify({'ok': False, 'error': '상품명을 입력하세요.'})
 
-    name_norm = name.replace(' ', '').replace('\u3000', '')
+    from services.product_name import canonical
+    name = canonical(name)
+    name_norm = name  # canonical applied
 
     try:
         # 1) 정확한 이름 중복 체크

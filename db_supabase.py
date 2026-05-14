@@ -1112,7 +1112,8 @@ class SupabaseDB(DBBase):
         storage_method: '냉동', '냉장', '실온', '' (미지정)
         """
         from datetime import datetime, timezone
-        product_name = str(product_name).replace(' ', '').strip()
+        from services.product_name import canonical
+        product_name = canonical(product_name)
         payload = {
             'product_name': product_name,
             'cost_price': float(cost_price),
@@ -1271,11 +1272,12 @@ class SupabaseDB(DBBase):
         """
         from datetime import datetime, timezone
         biz_id = self._resolve_biz_id(biz_id)
+        from services.product_name import canonical
         now = datetime.now(timezone.utc).isoformat()
         payload = []
         for item in items:
             payload.append({
-                'product_name': str(item['product_name']).replace(' ', '').strip(),
+                'product_name': canonical(item['product_name']),
                 'cost_price': float(item.get('cost_price', 0)),
                 'unit': item.get('unit', ''),
                 'memo': item.get('memo', ''),
@@ -1315,8 +1317,9 @@ class SupabaseDB(DBBase):
         from datetime import datetime, timezone
         if effective_date is None:
             effective_date = today_kst()
+        from services.product_name import canonical
         payload = {
-            'product_name': str(product_name).strip(),
+            'product_name': canonical(product_name),
             'old_cost_price': float(old_cost_price or 0),
             'new_cost_price': float(new_cost_price or 0),
             'old_conversion_ratio': float(old_conversion_ratio or 1),
@@ -1579,10 +1582,11 @@ class SupabaseDB(DBBase):
     # --- 품목명 공백 정리 ---
 
     def fix_product_name_spaces(self):
-        """stock_ledger + daily_revenue의 품목명에서 공백을 제거하여 통합.
+        """stock_ledger + daily_revenue의 품목명을 canonical로 통합.
         예: '(수)건해삼채 200g' → '(수)건해삼채200g'
         returns: (fixed_count, duplicate_groups) 수정된 건수와 중복 그룹 목록
         """
+        from services.product_name import canonical
         # stock_ledger
         all_rows = self._paginate_query("stock_ledger",
             lambda t: self.client.table(t).select("id,product_name").order("id"))
@@ -1590,7 +1594,7 @@ class SupabaseDB(DBBase):
         dupes = {}
         for r in all_rows:
             pn = r.get('product_name', '')
-            norm = str(pn).replace(' ', '').strip()
+            norm = canonical(pn)
             if norm != pn:
                 # 공백이 있는 이름 → 정규화된 이름으로 UPDATE
                 self.client.table("stock_ledger").update(
@@ -1606,7 +1610,7 @@ class SupabaseDB(DBBase):
             lambda t: self.client.table(t).select("id,product_name").order("id"))
         for r in rev_rows:
             pn = r.get('product_name', '')
-            norm = str(pn).replace(' ', '').strip()
+            norm = canonical(pn)
             if norm != pn:
                 self.client.table("daily_revenue").update(
                     {"product_name": norm}).eq("id", r['id']).execute()
@@ -2332,8 +2336,9 @@ class SupabaseDB(DBBase):
             "N배송": "네이버판매가",
         }
 
-        # 공백 정규화된 이름 (가격표 조회용)
-        norm_name = unicodedata.normalize('NFC', str(product_name).replace(' ', '').strip())
+        # 공백 정규화된 이름 (가격표 조회용) — canonical 전사 표준
+        from services.product_name import canonical
+        norm_name = canonical(product_name)
 
         def _price_lookup(pn, col):
             if not price_map or not col:

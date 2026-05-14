@@ -1,9 +1,9 @@
 -- 002: maesil-hub business tables (biz_id required, multi-tenant)
 -- Korean literal U&'\C815\C0C1' = jeongsang (active/normal status)
--- Korean literal U&'\C81C\D488' = jepum (product / 완제품)
+-- Korean literal U&'\C81C\D488' = jepum (product / finished goods)
 
 -- ──────────────────────────────────────────────
--- product_costs (상품/원료/부자재 마스터)
+-- product_costs (product / raw material / sub-material master)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS product_costs (
     id              BIGSERIAL PRIMARY KEY,
@@ -41,7 +41,7 @@ CREATE INDEX IF NOT EXISTS idx_pc_biz_sku ON product_costs(biz_id, sku) WHERE sk
 
 
 -- ──────────────────────────────────────────────
--- option_master (채널 옵션 -> 표준품목)
+-- option_master (channel option -> standard SKU)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS option_master (
     id              BIGSERIAL PRIMARY KEY,
@@ -63,7 +63,7 @@ CREATE INDEX IF NOT EXISTS idx_om_biz_product ON option_master(biz_id, product_n
 
 
 -- ──────────────────────────────────────────────
--- stock_ledger (수불장)
+-- stock_ledger (inventory in/out ledger)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS stock_ledger (
     id              BIGSERIAL PRIMARY KEY,
@@ -102,7 +102,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_sl_biz_event_uid ON stock_ledger(biz_id, ev
 
 
 -- ──────────────────────────────────────────────
--- import_runs (주문 업로드 이력)
+-- import_runs (order upload history)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS import_runs (
     id              BIGSERIAL PRIMARY KEY,
@@ -128,7 +128,7 @@ CREATE INDEX IF NOT EXISTS idx_ir_biz ON import_runs(biz_id, created_at DESC);
 
 
 -- ──────────────────────────────────────────────
--- order_transactions (주문)
+-- order_transactions (orders)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS order_transactions (
     id                 BIGSERIAL PRIMARY KEY,
@@ -174,7 +174,7 @@ CREATE INDEX IF NOT EXISTS idx_ot_biz_run ON order_transactions(biz_id, import_r
 
 
 -- ──────────────────────────────────────────────
--- order_shipping (송장)
+-- order_shipping (waybill / shipment)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS order_shipping (
     id              BIGSERIAL PRIMARY KEY,
@@ -219,7 +219,7 @@ CREATE INDEX IF NOT EXISTS idx_ocl_biz_order ON order_change_log(biz_id, order_t
 
 
 -- ──────────────────────────────────────────────
--- manual_trades (거래처 직접 출고/매입)
+-- manual_trades (direct B2B partner outbound/purchase)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS manual_trades (
     id              BIGSERIAL PRIMARY KEY,
@@ -243,7 +243,7 @@ CREATE INDEX IF NOT EXISTS idx_mt_biz_partner ON manual_trades(biz_id, partner_n
 
 
 -- ──────────────────────────────────────────────
--- daily_revenue (일일 매출)
+-- daily_revenue (daily sales aggregate)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS daily_revenue (
     id              BIGSERIAL PRIMARY KEY,
@@ -268,7 +268,7 @@ CREATE INDEX IF NOT EXISTS idx_dr_biz_date ON daily_revenue(biz_id, revenue_date
 
 
 -- ──────────────────────────────────────────────
--- packing_jobs (패킹센터)
+-- packing_jobs (packing center)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS packing_jobs (
     id                BIGSERIAL PRIMARY KEY,
@@ -293,7 +293,7 @@ CREATE INDEX IF NOT EXISTS idx_pj_biz_order ON packing_jobs(biz_id, order_no);
 
 
 -- ──────────────────────────────────────────────
--- business_partners (거래처)
+-- business_partners (B2B trading partners)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS business_partners (
     id              BIGSERIAL PRIMARY KEY,
@@ -318,7 +318,7 @@ CREATE INDEX IF NOT EXISTS idx_bp_biz ON business_partners(biz_id) WHERE NOT is_
 
 
 -- ──────────────────────────────────────────────
--- purchase_orders (발주서)
+-- purchase_orders (PO)
 -- ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS purchase_orders (
     id              BIGSERIAL PRIMARY KEY,

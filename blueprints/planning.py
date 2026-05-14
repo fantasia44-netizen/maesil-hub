@@ -395,7 +395,8 @@ def api_category_upload():
                 else:
                     # product_costs에 없는 품목 → 신규 등록
                     try:
-                        insert_data = {'product_name': name}
+                        from services.product_name import canonical
+                        insert_data = {'product_name': canonical(name)}
                         insert_data.update(update_data)
                         get_db().client.table('product_costs').insert(
                             insert_data

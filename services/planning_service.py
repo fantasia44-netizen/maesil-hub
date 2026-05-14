@@ -290,13 +290,14 @@ def calculate_production_plan(db, sales_window=DEFAULT_SALES_WINDOW,
 def _save_plan(db, result):
     """생산계획 결과를 production_plan 테이블에 upsert."""
     import json
+    from services.product_name import canonical
     plan_date = result['plan_date']
 
     payload = []
     for item in result['items']:
         payload.append({
             'plan_date': plan_date,
-            'product_name': item['product_name'],
+            'product_name': canonical(item['product_name']),
             'current_stock': item['current_stock'],
             'avg_daily_sales': item['avg_daily_sales'],
             'depletion_days': item['depletion_days'],
@@ -386,8 +387,9 @@ def update_product_planning_config(db, product_name, safety_stock=None,
         return False
 
     try:
+        from services.product_name import canonical
         db.client.table('product_costs').update(update) \
-            .eq('product_name', product_name).execute()
+            .eq('product_name', canonical(product_name)).execute()
         return True
     except Exception as e:
         print(f"[PlanningService] 설정 수정 실패: {e}")

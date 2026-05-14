@@ -25,9 +25,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RENDER_API_BASE = 'https://api.render.com/v1'
 
-# 동기화 시 제외할 키 (서버에 노출 금지)
+# 동기화 시 제외할 키 (서버에 노출 금지 또는 서버 무관)
 EXCLUDE_KEYS = {
-    'DATABASE_URL_LOCAL',  # 로컬 전용 등이 있으면 추가
+    'DATABASE_URL_LOCAL',
+    'RENDER_API_KEY',  # API key는 로컬 도구용, 서비스 자체 노출 불필요
+}
+
+# 환경별 자동 변환 (--service 이름에 'staging'/'prod' 포함 시)
+ENV_OVERRIDES = {
+    'staging': {'APP_ENV': 'staging'},
+    'prod': {'APP_ENV': 'production'},
+    'production': {'APP_ENV': 'production'},
 }
 
 
@@ -145,7 +153,21 @@ def cmd_sync(args):
                 continue
             env_dict[k] = v
 
-    print(f'Loaded from .env: {len(env_dict)} vars')
+    # 서비스 이름 기반 자동 override
+    svc_lower = args.service.lower()
+    for hint, overrides in ENV_OVERRIDES.items():
+        if hint in svc_lower:
+            for k, v in overrides.items():
+                env_dict[k] = v
+            print(f'[override] {hint}: {overrides}')
+            break
+
+    # EXCLUDE 적용
+    for k in list(env_dict):
+        if k in EXCLUDE_KEYS:
+            env_dict.pop(k, None)
+
+    print(f'Final env vars to push: {len(env_dict)}')
     for k in sorted(env_dict):
         masked = env_dict[k][:10] + '***' if len(env_dict[k]) > 10 else env_dict[k]
         print(f'  {k} = {masked}')

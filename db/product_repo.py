@@ -11,11 +11,12 @@ class ProductRepo(BaseRepo):
     """상품/옵션/마스터/BOM DB Repository."""
 
     def _normalize_product_names(payload_list):
-        """품목명 공백 정규화 — '(수)건해삼채 200g' → '(수)건해삼채200g'."""
+        """품목명 정규화 — 전사 표준 canonical() 단일 규칙."""
+        from services.product_name import canonical
         for row in payload_list:
             pn = row.get('product_name', '')
             if pn:
-                row['product_name'] = str(pn).replace(' ', '').strip()
+                row['product_name'] = canonical(pn)
         return payload_list
 
 
@@ -168,7 +169,8 @@ class ProductRepo(BaseRepo):
         storage_method: '냉동', '냉장', '실온', '' (미지정)
         """
         from datetime import datetime, timezone
-        product_name = str(product_name).replace(' ', '').strip()
+        from services.product_name import canonical
+        product_name = canonical(product_name)
         # material_type 자동 추론 (명시되지 않은 경우)
         # 기본: 완제품 (cost_type 소분/매입/생산/OEM 전부 완제품으로 처리)
         # 예외: category가 '반제품'/'부재료'/'원료'로 명시된 경우만 해당 분류
@@ -225,10 +227,11 @@ class ProductRepo(BaseRepo):
             if cat == '원료': return '원료'
             return '완제품'
 
+        from services.product_name import canonical
         payload = []
         for item in items:
             payload.append({
-                'product_name': str(item['product_name']).replace(' ', '').strip(),
+                'product_name': canonical(item['product_name']),
                 'cost_price': float(item.get('cost_price', 0)),
                 'unit': item.get('unit', ''),
                 'memo': item.get('memo', ''),
@@ -263,10 +266,11 @@ class ProductRepo(BaseRepo):
 
 
     def fix_product_name_spaces(self):
-        """stock_ledger + daily_revenue의 품목명에서 공백을 제거하여 통합.
+        """stock_ledger + daily_revenue의 품목명을 canonical로 통합.
         예: '(수)건해삼채 200g' → '(수)건해삼채200g'
         returns: (fixed_count, duplicate_groups) 수정된 건수와 중복 그룹 목록
         """
+        from services.product_name import canonical
         # stock_ledger
         all_rows = self._paginate_query("stock_ledger",
             lambda t: self.client.table(t).select("id,product_name").order("id"))
@@ -274,7 +278,7 @@ class ProductRepo(BaseRepo):
         dupes = {}
         for r in all_rows:
             pn = r.get('product_name', '')
-            norm = str(pn).replace(' ', '').strip()
+            norm = canonical(pn)
             if norm != pn:
                 # 공백이 있는 이름 → 정규화된 이름으로 UPDATE
                 self.client.table("stock_ledger").update(
@@ -290,7 +294,7 @@ class ProductRepo(BaseRepo):
             lambda t: self.client.table(t).select("id,product_name").order("id"))
         for r in rev_rows:
             pn = r.get('product_name', '')
-            norm = str(pn).replace(' ', '').strip()
+            norm = canonical(pn)
             if norm != pn:
                 self.client.table("daily_revenue").update(
                     {"product_name": norm}).eq("id", r['id']).execute()
@@ -612,8 +616,9 @@ class ProductRepo(BaseRepo):
             "N배송": "네이버판매가",
         }
 
-        # 공백 정규화된 이름 (가격표 조회용)
-        norm_name = unicodedata.normalize('NFC', str(product_name).replace(' ', '').strip())
+        # 공백 정규화된 이름 (가격표 조회용) — canonical 전사 표준
+        from services.product_name import canonical
+        norm_name = canonical(product_name)
 
         def _price_lookup(pn, col):
             if not price_map or not col:

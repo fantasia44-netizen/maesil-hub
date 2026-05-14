@@ -41,6 +41,8 @@ BEGIN
         'order_transactions','order_shipping','order_change_log','manual_trades',
         'daily_revenue','packing_jobs','business_partners','purchase_orders','my_business'
     ]) LOOP
+        EXECUTE format('DROP POLICY IF EXISTS service_role_all ON %I;', t);
+        EXECUTE format('DROP POLICY IF EXISTS tenant_isolation ON %I;', t);
         EXECUTE format('CREATE POLICY service_role_all ON %I FOR ALL TO service_role USING (true) WITH CHECK (true);', t);
         EXECUTE format(
             'CREATE POLICY tenant_isolation ON %I FOR ALL TO authenticated ' ||
@@ -63,15 +65,20 @@ ALTER TABLE payments            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE saas_config         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs          ENABLE ROW LEVEL SECURITY;
 
--- service_role full access on common tables
-CREATE POLICY service_role_all ON businesses        FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY service_role_all ON app_users         FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY service_role_all ON user_business_map FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY service_role_all ON plans             FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY service_role_all ON subscriptions     FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY service_role_all ON payments          FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY service_role_all ON saas_config       FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY service_role_all ON audit_logs        FOR ALL TO service_role USING (true) WITH CHECK (true);
+-- service_role full access on common tables (idempotent)
+DO $$
+DECLARE
+    t TEXT;
+BEGIN
+    FOR t IN SELECT unnest(ARRAY[
+        'businesses','app_users','user_business_map','plans',
+        'subscriptions','payments','saas_config','audit_logs'
+    ]) LOOP
+        EXECUTE format('DROP POLICY IF EXISTS service_role_all ON %I;', t);
+        EXECUTE format('CREATE POLICY service_role_all ON %I FOR ALL TO service_role USING (true) WITH CHECK (true);', t);
+    END LOOP;
+END;
+$$;
 
 -- authenticated read of own businesses (via user_business_map)
 -- (Phase 1 detailed; Phase 0 is server-side only via service_role)

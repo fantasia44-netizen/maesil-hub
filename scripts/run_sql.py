@@ -43,14 +43,17 @@ def load_env(env_name='development'):
     return None
 
 
-def fix_db_url(url):
-    """비밀번호 특수문자(@!) URL 인코딩."""
+def parse_db_url(url):
+    """URL -> dict for psycopg2 keyword args (URL 인코딩 이슈 회피)."""
     import urllib.parse
-    m = re.match(r'^(postgresql://)([^:]+):(.+)@([^@]+)$', url)
-    if not m:
-        return url
-    scheme, user, password, host_path = m.groups()
-    return f"{scheme}{user}:{urllib.parse.quote(password, safe='')}@{host_path}"
+    p = urllib.parse.urlparse(url)
+    return {
+        'host': p.hostname,
+        'port': p.port or 5432,
+        'user': urllib.parse.unquote(p.username or ''),
+        'password': urllib.parse.unquote(p.password or ''),
+        'dbname': (p.path or '').lstrip('/') or 'postgres',
+    }
 
 
 def run_psycopg2(sql, db_url):
@@ -61,20 +64,24 @@ def run_psycopg2(sql, db_url):
         return False
     print('[psycopg2] connecting...')
     try:
-        conn = psycopg2.connect(fix_db_url(db_url), connect_timeout=15)
+        params = parse_db_url(db_url)
+        params['connect_timeout'] = 15
+        conn = psycopg2.connect(**params)
         conn.set_client_encoding('UTF8')
     except Exception as e:
-        print(f'[psycopg2] connect failed: {e}')
+        msg = str(e).encode('ascii', errors='backslashreplace').decode()
+        print(f'[psycopg2] connect failed: {msg}')
         return False
     try:
         with conn.cursor() as cur:
             cur.execute(sql)
         conn.commit()
-        print('[psycopg2] OK — committed')
+        print('[psycopg2] OK - committed')
         return True
     except Exception as e:
         conn.rollback()
-        print(f'[psycopg2] ERROR: {e}')
+        msg = str(e).encode('ascii', errors='backslashreplace').decode()
+        print(f'[psycopg2] ERROR: {msg}')
         return False
     finally:
         try:

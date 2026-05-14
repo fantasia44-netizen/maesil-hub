@@ -127,6 +127,10 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action, created_a
 
 
 -- FK at the end (businesses.plan_id -> plans.id) to avoid circular dep
-ALTER TABLE businesses
-    ADD CONSTRAINT fk_businesses_plan
-    FOREIGN KEY (plan_id) REFERENCES plans(id) ON DELETE SET NULL;
+DO $$ BEGIN
+    ALTER TABLE businesses
+        ADD CONSTRAINT fk_businesses_plan
+        FOREIGN KEY (plan_id) REFERENCES plans(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN
+    NULL;
+END $$;

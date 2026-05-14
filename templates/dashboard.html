@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}대시보드 — 매실 허브{% endml %}{% endblock %}
+{% block content %}
+<div class="row g-3 mt-2">
+  <div class="col-12">
+    <h2>대시보드</h2>
+    <p class="text-muted">현재 회사: biz_id {{ biz_id }} (Phase 0 — 기본 화면)</p>
+  </div>
+
+  <div class="col-md-3">
+    <div class="card border-primary">
+      <div class="card-body">
+        <h6 class="text-muted small">오늘 주문</h6>
+        <div class="fs-3 fw-bold text-primary">- 건</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-success">
+      <div class="card-body">
+        <h6 class="text-muted small">미출고</h6>
+        <div class="fs-3 fw-bold text-success">- 건</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-warning">
+      <div class="card-body">
+        <h6 class="text-muted small">재고 품목</h6>
+        <div class="fs-3 fw-bold text-warning">- 종</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-info">
+      <div class="card-body">
+        <h6 class="text-muted small">이달 매출</h6>
+        <div class="fs-3 fw-bold text-info">- 원</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="alert alert-info mt-4">
+  <strong>Phase 0 진행 중</strong> — 데이터 연결 + 화면 구현은 Phase 2부터 본격 시작.
+</div>
+{% endblock %}

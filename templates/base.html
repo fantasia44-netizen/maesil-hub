@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}매실 허브{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif; }
+    .navbar-brand { font-weight: bold; color: #2d7a3e !important; }
+    .biz-badge { background: #e8f5e9; color: #2d7a3e; padding: 4px 10px; border-radius: 4px; font-size: 14px; }
+    .impersonate-banner { background: #fff3cd; padding: 8px 16px; text-align: center; font-size: 14px; border-bottom: 2px solid #ffc107; }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  {% if g.is_impersonating %}
+    <div class="impersonate-banner">
+      ⚠️ 슈퍼어드민 위장 중 (biz_id={{ g.biz_id }}) — <a href="{{ url_for('admin.stop_impersonate') if False else '#' }}">원래 화면으로</a>
+    </div>
+  {% endif %}
+
+  <nav class="navbar navbar-expand-lg navbar-light bg-light border-bottom">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="{{ url_for('main.index') }}">🌿 매실 허브</a>
+      <div class="ms-auto d-flex align-items-center gap-3">
+        {% if current_user.is_authenticated %}
+          {% if g.biz_id %}
+            <span class="biz-badge">biz_id: {{ g.biz_id }}</span>
+          {% endif %}
+          <span class="text-muted small">{{ current_user.name }}</span>
+          <a href="{{ url_for('auth.logout') }}" class="btn btn-sm btn-outline-secondary">로그아웃</a>
+        {% else %}
+          <a href="{{ url_for('auth.login') }}" class="btn btn-sm btn-outline-success">로그인</a>
+          <a href="{{ url_for('auth.signup') }}" class="btn btn-sm btn-success">회원가입</a>
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+
+  <div class="container-fluid mt-3">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+        <div class="alert alert-{{ cat }} alert-dismissible fade show" role="alert">
+          {{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

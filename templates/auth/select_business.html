@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}회사 선택{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+  <div class="col-md-6">
+    <h3 class="mb-4">회사 선택</h3>
+    <p class="text-muted">로그인할 회사를 선택하세요.</p>
+    <div class="list-group">
+      {% for biz in businesses %}
+        <form method="POST" class="d-flex">
+          <input type="hidden" name="biz_id" value="{{ biz.id }}">
+          <button type="submit" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
+            <div>
+              <strong>{{ biz.name }}</strong>
+              <br>
+              <small class="text-muted">{{ biz.industry }} · 권한: {{ ubm[biz.id].role if biz.id in ubm else '-' }}</small>
+            </div>
+            {% if ubm[biz.id].is_primary %}
+              <span class="badge bg-success">기본</span>
+            {% endif %}
+          </button>
+        </form>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

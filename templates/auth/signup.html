@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}회원가입 — 매실 허브{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-4">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-body">
+        <h3 class="card-title text-center mb-4">14일 무료 시작</h3>
+        <form method="POST">
+          <h5 class="text-muted small">계정 정보</h5>
+          <div class="mb-3">
+            <label class="form-label">이메일 *</label>
+            <input type="email" name="email" class="form-control" required autofocus>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">비밀번호 (최소 10자) *</label>
+            <input type="password" name="password" class="form-control" minlength="10" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">이름</label>
+            <input type="text" name="name" class="form-control">
+          </div>
+
+          <hr>
+          <h5 class="text-muted small">회사 정보</h5>
+          <div class="mb-3">
+            <label class="form-label">회사명 *</label>
+            <input type="text" name="biz_name" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">사업자등록번호</label>
+            <input type="text" name="biz_reg_no" class="form-control" placeholder="000-00-00000">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">업종</label>
+            <select name="industry" class="form-select">
+              <option value="food">식품 제조/가공</option>
+              <option value="livestock">축산</option>
+              <option value="seafood">수산</option>
+              <option value="agri">농산</option>
+              <option value="etc">기타</option>
+            </select>
+          </div>
+
+          <button type="submit" class="btn btn-success w-100 mt-3">가입하고 무료 시작</button>
+        </form>
+        <hr>
+        <div class="text-center">
+          <small>이미 계정 있으신가요? <a href="{{ url_for('auth.login') }}">로그인</a></small>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

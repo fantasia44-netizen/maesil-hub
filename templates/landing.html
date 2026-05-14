@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}매실 허브 — 식품·축산 ERP/WMS SaaS{% endblock %}
+{% block content %}
+<div class="text-center py-5">
+  <h1 class="display-4 mb-3">🌿 매실 허브</h1>
+  <p class="lead text-muted">식품·축산업 전용 ERP/WMS SaaS</p>
+  <p class="mt-4">
+    재고·생산·주문·송장·매출까지<br>
+    한 화면에서 관리하세요.
+  </p>
+  <div class="mt-5">
+    <a href="{{ url_for('auth.signup') }}" class="btn btn-success btn-lg me-2">14일 무료 시작</a>
+    <a href="{{ url_for('auth.login') }}" class="btn btn-outline-secondary btn-lg">로그인</a>
+  </div>
+</div>
+{% endblock %}

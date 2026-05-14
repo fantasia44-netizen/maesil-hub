@@ -1,17 +1,17 @@
 """
 maesil-hub — 식품·축산 ERP/WMS SaaS.
-Phase 0 minimal Flask app for Render initial deploy.
 """
 import os
 import logging
 from datetime import datetime, timezone
 
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template, g, session, redirect, url_for, Blueprint
+from flask_login import LoginManager, current_user
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ─── Sentry (선택, env DSN 있을 때만 활성화) ───
+# ─── Sentry ───
 SENTRY_DSN = os.environ.get('SENTRY_DSN', '').strip()
 if SENTRY_DSN:
     try:
@@ -29,56 +29,84 @@ if SENTRY_DSN:
 
 def create_app():
     app = Flask(__name__)
-    app.config.update(
-        SECRET_KEY=os.environ.get('SECRET_KEY', 'dev-only-change-me'),
-        SESSION_COOKIE_SECURE=os.environ.get('APP_ENV') == 'production',
-        SESSION_COOKIE_HTTPONLY=True,
-        SESSION_COOKIE_SAMESITE='Lax',
+    from config import Config
+    app.config.from_object(Config)
+
+    # ─── Logging ───
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     )
 
-    # ─── 헬스체크 (매실에이전시 외부 폴링용) ───
+    # ─── Flask-Login ───
+    login_manager = LoginManager()
+    login_manager.init_app(app)
+    login_manager.login_view = 'auth.login'
+
+    from auth.models import load_user_by_id
+    @login_manager.user_loader
+    def load_user(user_id):
+        return load_user_by_id(user_id)
+
+    # ─── Blueprints ───
+    from auth.views import auth_bp
+    app.register_blueprint(auth_bp)
+
+    # main blueprint (홈/대시보드)
+    main_bp = Blueprint('main', __name__)
+
+    @main_bp.route('/')
+    def index():
+        if current_user.is_authenticated:
+            return redirect(url_for('main.dashboard'))
+        return render_template('landing.html')
+
+    @main_bp.route('/dashboard')
+    def dashboard():
+        if not current_user.is_authenticated:
+            return redirect(url_for('auth.login'))
+        if not g.biz_id:
+            return redirect(url_for('auth.select_business'))
+        return render_template('dashboard.html', biz_id=g.biz_id)
+
+    app.register_blueprint(main_bp)
+
+    # ─── Health check (매실에이전시용) ───
     @app.route('/health')
     def health():
+        db_ok = False
+        try:
+            from db.client import get_admin_client
+            r = get_admin_client().table('plans').select('id').limit(1).execute()
+            db_ok = bool(r.data is not None)
+        except Exception:
+            db_ok = False
         return jsonify({
-            'status': 'ok',
+            'status': 'ok' if db_ok else 'degraded',
             'service': 'maesil-hub',
             'env': os.environ.get('APP_ENV', 'development'),
+            'db': 'ok' if db_ok else 'error',
             'time': datetime.now(timezone.utc).isoformat(),
         })
 
-    # ─── 임시 랜딩 (Phase 0) ───
-    @app.route('/')
-    def index():
-        return render_template_string(
-            """
-            <!DOCTYPE html>
-            <html lang="ko"><head>
-            <meta charset="utf-8"><title>매실 허브 (Maesil Hub)</title>
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-                     max-width: 720px; margin: 60px auto; padding: 20px; color: #1a1a1a; }
-              h1 { color: #2d7a3e; }
-              .badge { display: inline-block; background: #e8f5e9; color: #2d7a3e;
-                       padding: 4px 10px; border-radius: 4px; font-size: 14px; }
-              .meta { color: #666; font-size: 14px; margin-top: 24px; }
-              code { background: #f5f5f5; padding: 2px 6px; border-radius: 3px; }
-            </style></head>
-            <body>
-              <h1>🌿 매실 허브 (Maesil Hub)</h1>
-              <p class="badge">Phase 0 — 골격 배포 단계</p>
-              <p>식품·축산업 전용 ERP/WMS SaaS. 개발 진행 중.</p>
-              <ul>
-                <li>헬스체크: <a href="/health">/health</a></li>
-                <li>레포: <a href="https://github.com/fantasia44-netizen/maesil-hub">github.com/fantasia44-netizen/maesil-hub</a></li>
-              </ul>
-              <div class="meta">
-                <p>Env: {{ env }} · Deployed: {{ time }}</p>
-              </div>
-            </body></html>
-            """,
-            env=os.environ.get('APP_ENV', 'development'),
-            time=datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'),
-        )
+    # ─── Tenant context ───
+    @app.before_request
+    def set_tenant_context():
+        g.biz_id = None
+        g.is_impersonating = False
+        if not current_user.is_authenticated:
+            return
+        # impersonation 우선
+        if session.get('impersonating_biz_id'):
+            g.biz_id = session['impersonating_biz_id']
+            g.is_impersonating = True
+        else:
+            g.biz_id = session.get('current_biz_id')
+
+        # Supabase RLS 컨텍스트 (anon 클라이언트용, Phase 1+ 활성화)
+        # from db.client import get_supabase_client, set_tenant_context
+        # if g.biz_id:
+        #     set_tenant_context(get_supabase_client(), g.biz_id)
 
     return app
 

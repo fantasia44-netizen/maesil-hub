@@ -474,8 +474,21 @@ class SupabaseDB(DBBase):
             return self._with_biz(q, biz_id).order("id")
         return self._paginate_query("stock_ledger", builder)
 
+    # ── query_filter_options TTL 캐시 (프로세스 내 biz_id별 5분) ──
+    _filter_options_cache: dict = {}  # {biz_id: (expires_ts, locs, cats)}
+    _FILTER_OPTIONS_TTL = 300  # 5분
+
     def query_filter_options(self, biz_id=None):
-        """위치/카테고리 목록 반환. biz_id로 테넌트 격리 (tenant_guard 자동 주입)."""
+        """위치/카테고리 목록 반환. biz_id로 테넌트 격리 (tenant_guard 자동 주입).
+        5분 TTL 캐시로 반복 페이지네이션 스캔 방지.
+        """
+        import time as _time
+        cache_key = biz_id  # None도 키로 사용 가능
+        now = _time.time()
+        cached = self._filter_options_cache.get(cache_key)
+        if cached and now < cached[0]:
+            return cached[1], cached[2]
+
         def builder(table):
             q = self.client.table(table).select("location,category") \
                 .eq("status", "active").order("id")
@@ -483,6 +496,7 @@ class SupabaseDB(DBBase):
         all_vals = self._paginate_query("stock_ledger", builder)
         locs = sorted(set(r['location'] for r in all_vals if r.get('location')))
         cats = sorted(set(r['category'] for r in all_vals if r.get('category')))
+        self._filter_options_cache[cache_key] = (now + self._FILTER_OPTIONS_TTL, locs, cats)
         return locs, cats
 
     def query_product_categories(self, biz_id=None):

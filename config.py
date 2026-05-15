@@ -39,6 +39,12 @@ class Config:
     # ── Fernet (saas_config 암호화) ──
     FERNET_KEY = os.environ.get('FERNET_KEY', '')
 
+    # ── 파일 저장 경로 ──
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+    OUTPUT_FOLDER = os.path.join(BASE_DIR, 'outputs')
+    MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
+
     # ── 외부 API (saas_config DB에서 동적 로드 권장) ──
     CJ_CUST_ID = os.environ.get('CJ_CUST_ID', '')
     NAVER_COMMERCE_CLIENT_ID = os.environ.get('NAVER_COMMERCE_CLIENT_ID', '')

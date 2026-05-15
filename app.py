@@ -32,6 +32,13 @@ def create_app():
     from config import Config
     app.config.from_object(Config)
 
+    # ─── 업로드/출력 폴더 자동 생성 ───
+    import pathlib
+    for folder_key in ('UPLOAD_FOLDER', 'OUTPUT_FOLDER'):
+        folder = app.config.get(folder_key, '')
+        if folder:
+            pathlib.Path(folder).mkdir(parents=True, exist_ok=True)
+
     # ─── 인코딩 / 시간 표준 (CONVENTIONS.md 1, 2) ───
     # JSON 응답 UTF-8 (한글 escape 안 함)
     app.config['JSON_AS_ASCII'] = False
@@ -69,6 +76,10 @@ def create_app():
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     )
+
+    # ─── Flask-WTF CSRF ───
+    from flask_wtf.csrf import CSRFProtect
+    csrf = CSRFProtect(app)
 
     # ─── Flask-Login ───
     login_manager = LoginManager()

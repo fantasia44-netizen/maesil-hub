@@ -101,82 +101,80 @@
 
     <!-- 주문 -->
     <div class="menu-label">주문</div>
-    <a class="nav-link {% if '/orders' in request.path %}active{% endif %}"
-       href="/orders"><i class="bi bi-bag-check"></i> 주문관리</a>
-    <a class="nav-link {% if '/shipment' in request.path %}active{% endif %}"
-       href="/shipment"><i class="bi bi-truck"></i> 출고관리</a>
-    <a class="nav-link {% if '/outbound' in request.path and '/etc' not in request.path %}active{% endif %}"
-       href="/outbound"><i class="bi bi-box-arrow-right"></i> 출고처리</a>
-    <a class="nav-link {% if '/etc_outbound' in request.path %}active{% endif %}"
-       href="/etc_outbound"><i class="bi bi-box-arrow-up-right"></i> 기타출고</a>
+    <a class="nav-link {% if request.path.startswith('/orders') %}active{% endif %}"
+       href="/orders/"><i class="bi bi-bag-check"></i> 주문관리</a>
+    <a class="nav-link {% if request.path.startswith('/shipment') %}active{% endif %}"
+       href="/shipment/"><i class="bi bi-truck"></i> 출고관리</a>
+    <a class="nav-link {% if request.path.startswith('/outbound') and not request.path.startswith('/etc') %}active{% endif %}"
+       href="/outbound/"><i class="bi bi-box-arrow-right"></i> 출고처리</a>
+    <a class="nav-link {% if request.path.startswith('/etc-outbound') %}active{% endif %}"
+       href="/etc-outbound/"><i class="bi bi-box-arrow-up-right"></i> 기타출고</a>
 
     <!-- 재고/생산 -->
     <div class="menu-label">재고 · 생산</div>
-    <a class="nav-link {% if '/stock' in request.path %}active{% endif %}"
-       href="/stock"><i class="bi bi-archive"></i> 수불장</a>
-    <a class="nav-link {% if '/ledger' in request.path %}active{% endif %}"
-       href="/ledger"><i class="bi bi-journal-text"></i> 재고원장</a>
-    <a class="nav-link {% if '/production' in request.path %}active{% endif %}"
-       href="/production"><i class="bi bi-gear"></i> 생산관리</a>
-    <a class="nav-link {% if '/inbound' in request.path %}active{% endif %}"
-       href="/inbound"><i class="bi bi-box-arrow-in-left"></i> 입고관리</a>
-    <a class="nav-link {% if '/transfer' in request.path %}active{% endif %}"
-       href="/transfer"><i class="bi bi-arrow-left-right"></i> 창고이동</a>
-    <a class="nav-link {% if '/repack' in request.path %}active{% endif %}"
-       href="/repack"><i class="bi bi-recycle"></i> 리패킹</a>
-    <a class="nav-link {% if '/set_assembly' in request.path %}active{% endif %}"
-       href="/set_assembly"><i class="bi bi-collection"></i> 세트구성</a>
+    <a class="nav-link {% if request.path.startswith('/stock') %}active{% endif %}"
+       href="/stock/"><i class="bi bi-archive"></i> 수불장</a>
+    <a class="nav-link {% if request.path.startswith('/ledger') %}active{% endif %}"
+       href="/ledger/"><i class="bi bi-journal-text"></i> 재고원장</a>
+    <a class="nav-link {% if request.path.startswith('/production') %}active{% endif %}"
+       href="/production/"><i class="bi bi-gear"></i> 생산관리</a>
+    <a class="nav-link {% if request.path.startswith('/inbound') %}active{% endif %}"
+       href="/inbound/"><i class="bi bi-box-arrow-in-left"></i> 입고관리</a>
+    <a class="nav-link {% if request.path.startswith('/transfer') %}active{% endif %}"
+       href="/transfer/"><i class="bi bi-arrow-left-right"></i> 창고이동</a>
+    <a class="nav-link {% if request.path.startswith('/repack') %}active{% endif %}"
+       href="/repack/"><i class="bi bi-recycle"></i> 리패킹</a>
+    <a class="nav-link {% if request.path.startswith('/set-assembly') %}active{% endif %}"
+       href="/set-assembly/"><i class="bi bi-collection"></i> 세트구성</a>
 
     <!-- 매출/정산 -->
     <div class="menu-label">매출 · 정산</div>
-    <a class="nav-link {% if '/revenue' in request.path %}active{% endif %}"
-       href="/revenue"><i class="bi bi-bar-chart-line"></i> 매출분석</a>
-    <a class="nav-link {% if '/aggregation' in request.path %}active{% endif %}"
-       href="/aggregation"><i class="bi bi-calculator"></i> 정산집계</a>
-    <a class="nav-link {% if '/adjustment' in request.path %}active{% endif %}"
-       href="/adjustment"><i class="bi bi-sliders"></i> 조정내역</a>
-    <a class="nav-link {% if '/marketplace' in request.path %}active{% endif %}"
-       href="/marketplace"><i class="bi bi-shop"></i> 마켓플레이스</a>
+    <a class="nav-link {% if request.path.startswith('/revenue') %}active{% endif %}"
+       href="/revenue/"><i class="bi bi-bar-chart-line"></i> 매출분석</a>
+    <a class="nav-link {% if request.path.startswith('/aggregation') %}active{% endif %}"
+       href="/aggregation/"><i class="bi bi-calculator"></i> 정산집계</a>
+    <a class="nav-link {% if request.path.startswith('/adjustment') %}active{% endif %}"
+       href="/adjustment/"><i class="bi bi-sliders"></i> 조정내역</a>
+    <a class="nav-link {% if request.path.startswith('/marketplace') %}active{% endif %}"
+       href="/marketplace/"><i class="bi bi-shop"></i> 마켓플레이스</a>
 
     <!-- 구매/거래처 -->
     <div class="menu-label">구매 · 거래처</div>
-    <a class="nav-link {% if '/trade' in request.path %}active{% endif %}"
-       href="/trade"><i class="bi bi-cart3"></i> 발주관리</a>
-    <a class="nav-link {% if '/partners' in request.path %}active{% endif %}"
-       href="/partners"><i class="bi bi-people"></i> 거래처</a>
-    <a class="nav-link {% if '/tax_invoice' in request.path %}active{% endif %}"
-       href="/tax_invoice"><i class="bi bi-receipt"></i> 세금계산서</a>
+    <a class="nav-link {% if request.path.startswith('/trade') %}active{% endif %}"
+       href="/trade/"><i class="bi bi-cart3"></i> 발주관리</a>
+    <a class="nav-link {% if request.path.startswith('/tax-invoice') %}active{% endif %}"
+       href="/tax-invoice/"><i class="bi bi-receipt"></i> 세금계산서</a>
 
     <!-- 회계 -->
     <div class="menu-label">회계 · 재무</div>
-    <a class="nav-link {% if '/accounting' in request.path %}active{% endif %}"
-       href="/accounting"><i class="bi bi-bank"></i> 회계</a>
-    <a class="nav-link {% if '/finance' in request.path %}active{% endif %}"
-       href="/finance"><i class="bi bi-currency-exchange"></i> 재무현황</a>
-    <a class="nav-link {% if '/bank' in request.path %}active{% endif %}"
-       href="/bank"><i class="bi bi-credit-card"></i> 입출금</a>
-    <a class="nav-link {% if '/journal' in request.path %}active{% endif %}"
-       href="/journal"><i class="bi bi-book"></i> 분개장</a>
+    <a class="nav-link {% if request.path.startswith('/accounting') %}active{% endif %}"
+       href="/accounting/"><i class="bi bi-bank"></i> 회계</a>
+    <a class="nav-link {% if request.path.startswith('/finance') %}active{% endif %}"
+       href="/finance/dashboard"><i class="bi bi-currency-exchange"></i> 재무현황</a>
+    <a class="nav-link {% if request.path.startswith('/bank') %}active{% endif %}"
+       href="/bank/"><i class="bi bi-credit-card"></i> 입출금</a>
+    <a class="nav-link {% if request.path.startswith('/journal') %}active{% endif %}"
+       href="/journal/"><i class="bi bi-book"></i> 분개장</a>
 
-    <!-- 패킹센터 -->
+    <!-- 현장 -->
     <div class="menu-label">현장</div>
-    <a class="nav-link {% if '/packing' in request.path %}active{% endif %}"
-       href="/packing"><i class="bi bi-box-seam"></i> 패킹센터</a>
-    <a class="nav-link {% if '/planning' in request.path %}active{% endif %}"
-       href="/planning"><i class="bi bi-calendar3"></i> 생산계획</a>
-    <a class="nav-link {% if '/hr' in request.path %}active{% endif %}"
-       href="/hr"><i class="bi bi-person-badge"></i> 인사/급여</a>
+    <a class="nav-link {% if request.path.startswith('/packing') %}active{% endif %}"
+       href="/packing/"><i class="bi bi-box-seam"></i> 패킹센터</a>
+    <a class="nav-link {% if request.path.startswith('/planning') %}active{% endif %}"
+       href="/planning/"><i class="bi bi-calendar3"></i> 생산계획</a>
+    <a class="nav-link {% if request.path.startswith('/hr') %}active{% endif %}"
+       href="/hr/employees"><i class="bi bi-person-badge"></i> 인사/급여</a>
 
     <!-- 설정 -->
     <div class="menu-label">설정</div>
-    <a class="nav-link {% if '/master' in request.path %}active{% endif %}"
-       href="/master"><i class="bi bi-tags"></i> 상품마스터</a>
-    <a class="nav-link {% if '/bom_cost' in request.path %}active{% endif %}"
-       href="/bom_cost"><i class="bi bi-diagram-3"></i> BOM/원가</a>
-    <a class="nav-link {% if '/price_mgmt' in request.path %}active{% endif %}"
-       href="/price_mgmt"><i class="bi bi-tag"></i> 가격관리</a>
-    <a class="nav-link {% if '/base_data' in request.path %}active{% endif %}"
-       href="/base_data"><i class="bi bi-database"></i> 기초데이터</a>
+    <a class="nav-link {% if request.path.startswith('/master') %}active{% endif %}"
+       href="/master/"><i class="bi bi-tags"></i> 상품마스터</a>
+    <a class="nav-link {% if request.path.startswith('/bom-cost') %}active{% endif %}"
+       href="/bom-cost/"><i class="bi bi-diagram-3"></i> BOM/원가</a>
+    <a class="nav-link {% if request.path.startswith('/price') %}active{% endif %}"
+       href="/price/"><i class="bi bi-tag"></i> 가격관리</a>
+    <a class="nav-link {% if request.path.startswith('/base-data') %}active{% endif %}"
+       href="/base-data/"><i class="bi bi-database"></i> 기초데이터</a>
 
     {% if current_user.is_super_admin %}
     <div class="menu-label">관리자</div>

@@ -38,6 +38,17 @@ class HubUser(UserMixin):
             return False
         return True
 
+    @property
+    def role(self):
+        """현재 세션 biz의 역할. 슈퍼어드민은 항상 admin."""
+        if self.is_super_admin:
+            return 'admin'
+        from flask import g
+        try:
+            return g.get('user_role', 'viewer')
+        except RuntimeError:
+            return 'viewer'
+
 
 def load_user_by_id(user_id):
     """Flask-Login user loader."""

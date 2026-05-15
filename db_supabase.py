@@ -988,13 +988,15 @@ class SupabaseDB(DBBase):
 
     # --- daily_closing (일일마감) ---
 
-    def get_closing_status(self, closing_date, closing_type):
-        """특정 날짜+유형의 마감 상태 조회. None이면 미생성(open)."""
-        res = (self.client.table("daily_closing")
-               .select("*")
-               .eq("closing_date", closing_date)
-               .eq("closing_type", closing_type)
-               .limit(1).execute())
+    def get_closing_status(self, closing_date, closing_type, biz_id=None):
+        """특정 날짜+유형의 마감 상태 조회. None이면 미생성(open). biz_id 테넌트 격리."""
+        biz_id = self._resolve_biz_id(biz_id)
+        q = (self.client.table("daily_closing")
+             .select("*")
+             .eq("closing_date", closing_date)
+             .eq("closing_type", closing_type)
+             .limit(1))
+        res = self._with_biz(q, biz_id).execute()
         return res.data[0] if res.data else None
 
     def is_closed(self, closing_date, closing_type):
@@ -1032,9 +1034,11 @@ class SupabaseDB(DBBase):
         }).eq("id", row['id'])
         self._with_biz(q, biz_id).execute()
 
-    def query_closing_list(self, date_from=None, date_to=None, closing_type=None):
-        """마감 이력 조회."""
+    def query_closing_list(self, date_from=None, date_to=None, closing_type=None, biz_id=None):
+        """마감 이력 조회. biz_id 테넌트 격리 (tenant_guard 자동 주입)."""
+        biz_id = self._resolve_biz_id(biz_id)
         q = self.client.table("daily_closing").select("*").order("closing_date", desc=True)
+        q = self._with_biz(q, biz_id)
         if date_from:
             q = q.gte("closing_date", date_from)
         if date_to:
@@ -3207,14 +3211,15 @@ class SupabaseDB(DBBase):
         except Exception:
             return []
 
-    def query_top_products_by_revenue(self, days=30, limit=10):
-        """매출 TOP N 상품 — SQL RPC 우선, 실패 시 Python 폴백."""
+    def query_top_products_by_revenue(self, days=30, limit=10, biz_id=None):
+        """매출 TOP N 상품 — SQL RPC 우선, 실패 시 Python 폴백. biz_id 테넌트 격리."""
+        biz_id = self._resolve_biz_id(biz_id)
         # RPC 경로
         try:
-            res = self.client.rpc('get_dashboard_top_products', {
-                'p_days': days,
-                'p_limit': limit,
-            }).execute()
+            params = {'p_days': days, 'p_limit': limit}
+            if biz_id:
+                params['p_biz_id'] = biz_id
+            res = self.client.rpc('get_dashboard_top_products', params).execute()
             data = res.data
             if isinstance(data, list):
                 return [
@@ -3229,13 +3234,15 @@ class SupabaseDB(DBBase):
 
         try:
             date_from = days_ago_kst(days)
+            _biz = biz_id
 
             def builder(table):
-                return self.client.table(table) \
+                q = self.client.table(table) \
                     .select("product_name,qty,total_amount,settlement") \
                     .gte("order_date", date_from) \
                     .eq("status", "정상") \
                     .order("id")
+                return self._with_biz(q, _biz)
 
             all_data = self._paginate_query("order_transactions", builder)
 
@@ -3255,17 +3262,20 @@ class SupabaseDB(DBBase):
         except Exception:
             return []
 
-    def query_recent_activity(self, limit=20):
-        """최근 활동 (stock_ledger + order_transactions 통합)."""
+    def query_recent_activity(self, limit=20, biz_id=None):
+        """최근 활동 (stock_ledger + order_transactions 통합). biz_id 테넌트 격리."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             # 최근 주문
-            orders = self.client.table("order_transactions") \
+            q_o = self.client.table("order_transactions") \
                 .select("id,channel,order_date,product_name,qty,processed_at") \
-                .order("id", desc=True).limit(limit).execute()
+                .order("id", desc=True).limit(limit)
+            orders = self._with_biz(q_o, biz_id).execute()
             # 최근 재고 변동
-            stock = self.client.table("stock_ledger") \
+            q_s = self.client.table("stock_ledger") \
                 .select("id,type,product_name,qty,location,transaction_date") \
-                .order("id", desc=True).limit(limit).execute()
+                .order("id", desc=True).limit(limit)
+            stock = self._with_biz(q_s, biz_id).execute()
 
             activities = []
             for o in (orders.data or []):
@@ -3295,10 +3305,12 @@ class SupabaseDB(DBBase):
     # Phase 2: BOM 마스터 조회 (자동 처리용)
     # ================================================================
 
-    def query_bom_master_all(self):
-        """bom_master 전체 조회. Returns: list of {channel, set_name, components}."""
+    def query_bom_master_all(self, biz_id=None):
+        """bom_master 전체 조회. Returns: list of {channel, set_name, components}. biz_id 테넌트 격리."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            res = self.client.table("bom_master").select("*").execute()
+            q = self.client.table("bom_master").select("*")
+            res = self._with_biz(q, biz_id).execute()
             return res.data or []
         except Exception as e:
             print(f"[DB] query_bom_master_all error: {e}")
@@ -5485,11 +5497,13 @@ class SupabaseDB(DBBase):
 
     # ── payment_matches ──
 
-    def query_payment_matches(self, date_from=None, date_to=None, status=None):
-        """매출-입금 매칭 목록 조회."""
+    def query_payment_matches(self, date_from=None, date_to=None, status=None, biz_id=None):
+        """매출-입금 매칭 목록 조회. biz_id 테넌트 격리 (tenant_guard 자동 주입)."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("payment_matches") \
                 .select("*").or_("is_deleted.is.null,is_deleted.eq.false").order("matched_at", desc=True)
+            q = self._with_biz(q, biz_id)
             if date_from:
                 q = q.gte("matched_at", date_from)
             if date_to:
@@ -5549,11 +5563,13 @@ class SupabaseDB(DBBase):
     # ── platform_settlements ──
 
     def query_platform_settlements(self, channel=None, match_status=None,
-                                    date_from=None, date_to=None):
-        """플랫폼 정산 조회."""
+                                    date_from=None, date_to=None, biz_id=None):
+        """플랫폼 정산 조회. biz_id 테넌트 격리 (tenant_guard 자동 주입)."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
             q = self.client.table("platform_settlements") \
                 .select("*").order("settlement_date", desc=True)
+            q = self._with_biz(q, biz_id)
             if channel:
                 q = q.eq("channel", channel)
             if match_status:
@@ -5695,14 +5711,16 @@ class SupabaseDB(DBBase):
 
     def query_card_transactions(self, date_from=None, date_to=None,
                                  bank_account_id=None, category=None,
-                                 search=None):
-        """카드 이용내역 목록 조회."""
+                                 search=None, biz_id=None):
+        """카드 이용내역 목록 조회. biz_id 테넌트 격리 (tenant_guard 자동 주입)."""
+        biz_id = self._resolve_biz_id(biz_id)
         def _do():
             q = self.client.table("card_transactions") \
                 .select("*, bank_accounts(bank_name, account_number)") \
                 .or_("is_deleted.is.null,is_deleted.eq.false") \
                 .order("approval_date", desc=True) \
                 .order("approval_time", desc=True)
+            q = self._with_biz(q, biz_id)
             if date_from:
                 q = q.gte("approval_date", date_from)
             if date_to:

@@ -69,6 +69,28 @@ def create_app():
     def _kst_full_filter(dt):
         return _kst_filter(dt, '%Y-%m-%d %H:%M:%S KST')
 
+    @app.template_filter('fmt_qty')
+    def _fmt_qty(v):
+        """수량 포맷: 소수점 없으면 정수, 있으면 소수 1자리."""
+        try:
+            f = float(v)
+            return f'{int(f):,}' if f == int(f) else f'{f:,.1f}'
+        except (TypeError, ValueError):
+            return v if v is not None else '-'
+
+    @app.template_filter('fmt_money')
+    def _fmt_money(v):
+        """금액 포맷: 천단위 콤마, None은 '-'."""
+        try:
+            return f'{int(round(float(v))):,}'
+        except (TypeError, ValueError):
+            return v if v is not None else '-'
+
+    @app.template_filter('fmt_kst')
+    def _fmt_kst(v, fmt='%Y-%m-%d %H:%M'):
+        """UTC/ISO 문자열 → KST 표시 (kst 필터 별칭)."""
+        return _kst_filter(v, fmt)
+
     # ─── 멀티테넌트 가드 ───
     # SupabaseDB 모든 메서드에 biz_id=g.biz_id 자동 주입.
     # 레거시 blueprints에서 biz_id 누락해도 사업자 격리 보장.
@@ -203,6 +225,19 @@ def create_app():
             'db': 'ok' if db_ok else 'error',
             'time': datetime.now(timezone.utc).isoformat(),
         })
+
+    # ─── 템플릿 전역 컨텍스트 ───
+    @app.context_processor
+    def inject_globals():
+        """모든 템플릿에 current_biz, g 등 주입."""
+        from flask import g as _g
+        biz = None
+        if hasattr(_g, 'biz_id') and _g.biz_id:
+            biz = type('Biz', (), {
+                'id': _g.biz_id,
+                'name': getattr(_g, 'biz_name', None) or str(_g.biz_id),
+            })()
+        return dict(current_biz=biz)
 
     # ─── MarketplaceManager (g.marketplace) ───
     try:

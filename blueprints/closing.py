@@ -34,8 +34,11 @@ def index():
     date_from = request.args.get('date_from', two_weeks_ago)
     date_to = request.args.get('date_to', today)
 
-    revenue_list = db.query_closing_list(date_from, date_to, 'revenue')
-    stock_list = db.query_closing_list(date_from, date_to, 'stock')
+    try:
+        revenue_list = db.query_closing_list(date_from, date_to, 'revenue')
+        stock_list = db.query_closing_list(date_from, date_to, 'stock')
+    except Exception:
+        revenue_list, stock_list = [], []
 
     # 날짜별 매핑
     closing_map = {}

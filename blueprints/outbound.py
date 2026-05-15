@@ -40,9 +40,11 @@ def index():
     my_businesses = []
     trade_list = []
 
-    # 필터 파라미터
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
+    # 필터 파라미터 (기본: 이번달)
+    _today = today_kst()
+    _month_start = _today[:8] + '01'
+    date_from = request.args.get('date_from', '') or _month_start
+    date_to = request.args.get('date_to', '') or _today
     partner_filter = request.args.get('partner_filter', '전체')
     keyword = request.args.get('keyword', '').strip()
 

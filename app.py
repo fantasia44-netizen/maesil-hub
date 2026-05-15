@@ -27,6 +27,13 @@ if SENTRY_DSN:
         logging.warning(f'Sentry init failed: {e}')
 
 
+class _NullMarketplace:
+    """MarketplaceManager 초기화 실패 시 대체 (빈 객체)."""
+    def get_all_channels(self): return []
+    def get_client(self, *a, **kw): return None
+    def __getattr__(self, name): return lambda *a, **kw: []
+
+
 def create_app():
     app = Flask(__name__)
     from config import Config
@@ -197,12 +204,22 @@ def create_app():
             'time': datetime.now(timezone.utc).isoformat(),
         })
 
+    # ─── MarketplaceManager (g.marketplace) ───
+    try:
+        from services.marketplace import MarketplaceManager
+        app._marketplace_default = MarketplaceManager()   # API 키 없으면 빈 매니저
+    except Exception as e:
+        logging.warning(f'MarketplaceManager init failed: {e}')
+        app._marketplace_default = None
+
     # ─── Tenant context ───
     @app.before_request
     def set_tenant_context():
         g.biz_id = None
         g.biz_name = None
         g.is_impersonating = False
+        # g.marketplace — 레거시 blueprints 호환 (빈 매니저)
+        g.marketplace = getattr(app, '_marketplace_default', None) or _NullMarketplace()
         if not current_user.is_authenticated:
             return
         # impersonation 우선

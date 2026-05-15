@@ -302,6 +302,32 @@ def create_app():
         # if g.biz_id:
         #     set_tenant_context(get_supabase_client(), g.biz_id)
 
+    # ─── 전역 에러 핸들러 (프로덕션: 예외 상세 미노출) ───
+    _is_production = os.environ.get('APP_ENV', 'development') == 'production'
+
+    @app.errorhandler(500)
+    def server_error(e):
+        logging.error(f'500 Internal Server Error: {e}', exc_info=True)
+        from flask import request as _req
+        if _req.is_json or _req.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            msg = '서버 오류가 발생했습니다.' if _is_production else str(e)
+            return jsonify({'error': msg}), 500
+        return render_template('errors/500.html') if _is_production else str(e), 500
+
+    @app.errorhandler(404)
+    def not_found(e):
+        from flask import request as _req
+        if _req.is_json or _req.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': '리소스를 찾을 수 없습니다.'}), 404
+        return render_template('errors/404.html'), 404
+
+    @app.errorhandler(403)
+    def forbidden(e):
+        from flask import request as _req
+        if _req.is_json or _req.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({'error': '권한이 없습니다.'}), 403
+        return render_template('errors/403.html'), 403
+
     return app
 
 

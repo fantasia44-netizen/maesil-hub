@@ -154,7 +154,7 @@
                     {% for row in ledger %}
                     <tr>
                         <td><strong>{{ row.product_name }}</strong></td>
-                        <td class="text-center text-muted small">{{ sku_map.get(row.product_name, '-') }}</td>
+                        <td class="text-center text-muted small">{{ (sku_map | default({})).get(row.product_name, '-') if sku_map is defined else '-' }}</td>
                         <td>{{ row.location|default('') }}</td>
                         <td>{{ row.category|default('') }}</td>
                         <td>

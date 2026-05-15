@@ -144,7 +144,7 @@
                     {% for row in rows %}
                     <tr{% if row.is_negative %} class="table-danger"{% endif %}>
                         <td><strong>{{ row.product_name }}</strong></td>
-                        <td class="text-center text-muted small">{{ sku_map.get(row.product_name, '-') }}</td>
+                        <td class="text-center text-muted small">{{ (sku_map | default({}) ).get(row.product_name, '-') if sku_map is defined else '-' }}</td>
                         <td>{{ row.category|default('-', true) }}</td>
                         <td>{% if row.food_type %}<span class="badge {% if row.food_type == '농산물' %}bg-success{% elif row.food_type == '수산물' %}bg-primary{% elif row.food_type == '축산물' %}bg-danger{% else %}bg-secondary{% endif %} small">{{ row.food_type }}</span>{% else %}-{% endif %}</td>
                         <td class="text-end">{{ row.qty|fmt_qty }}</td>

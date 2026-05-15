@@ -5461,8 +5461,9 @@ class SupabaseDB(DBBase):
             print(f"[DB] batch_insert_tax_invoices error: {e}")
             return 0
 
-    def query_existing_invoice_numbers(self, invoice_numbers):
-        """승인번호 목록으로 기존 세금계산서 일괄 조회. Returns: set of existing numbers."""
+    def query_existing_invoice_numbers(self, invoice_numbers, biz_id=None):
+        """승인번호 목록으로 기존 세금계산서 일괄 조회. Returns: set of existing numbers. biz_id 테넌트 격리."""
+        biz_id = self._resolve_biz_id(biz_id)
         if not invoice_numbers:
             return set()
         try:
@@ -5470,10 +5471,10 @@ class SupabaseDB(DBBase):
             if not nums:
                 return set()
             # Supabase in_ 필터로 한번에 조회
-            res = self.client.table("tax_invoices") \
+            q = self.client.table("tax_invoices") \
                 .select("invoice_number") \
-                .in_("invoice_number", nums) \
-                .execute()
+                .in_("invoice_number", nums)
+            res = self._with_biz(q, biz_id).execute()
             return {r['invoice_number'] for r in (res.data or [])}
         except Exception as e:
             print(f"[DB] query_existing_invoice_numbers error: {e}")

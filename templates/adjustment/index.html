@@ -368,7 +368,7 @@
     const BATCH_URL = '{{ url_for("adjustment.batch") }}';
     const PRODUCTS_URL = '{{ url_for("adjustment.api_products") }}';
     const HISTORY_URL = '{{ url_for("adjustment.api_history") }}';
-    const SKU_MAP = {{ sku_map | tojson }};
+    const SKU_MAP = {{ (sku_map | default({})) | tojson }};
     const isAdmin = {{ 'true' if current_user.role == 'admin' else 'false' }};
     let editMode = isAdmin;
 

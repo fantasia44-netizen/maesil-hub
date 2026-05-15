@@ -161,18 +161,23 @@ def impersonate(biz_id: int):
         .eq('id', biz_id).single().execute().data
     if not biz:
         abort(404)
+    session['pre_impersonate_biz_id'] = session.get('current_biz_id')  # 원래 biz 저장
     session['impersonating_biz_id'] = biz_id
     log_audit('impersonate_start', detail={'biz_id': biz_id, 'name': biz.get('name')},
               biz_id=biz_id)
-    flash(f'now impersonating {biz.get("name")} (biz_id={biz_id})', 'warning')
+    flash(f'위장 중: {biz.get("name")} (biz_id={biz_id})', 'warning')
     return redirect(url_for('main.dashboard'))
 
 
-@admin_saas_bp.route('/impersonate/stop', methods=['POST', 'GET'])
+@admin_saas_bp.route('/impersonate/stop', methods=['POST'])   # GET 제거 (CSRF 방어)
 @login_required
 @super_admin_required
 def stop_impersonate():
     biz_id = session.pop('impersonating_biz_id', None)
+    # 원래 biz_id 복원
+    prev = session.pop('pre_impersonate_biz_id', None)
+    if prev:
+        session['current_biz_id'] = prev
     if biz_id:
         log_audit('impersonate_stop', detail={'biz_id': biz_id})
     return redirect(url_for('admin_saas.dashboard'))

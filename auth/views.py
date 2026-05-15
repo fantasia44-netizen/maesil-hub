@@ -113,7 +113,14 @@ def login():
 
     email = request.form.get('email', '').strip().lower()
     password = request.form.get('password', '')
-    next_url = request.args.get('next') or url_for('main.dashboard')
+    # Open Redirect 방지: 같은 호스트인 경우만 허용
+    from urllib.parse import urlparse, urljoin
+    def _is_safe_url(target):
+        ref = urlparse(request.host_url)
+        test = urlparse(urljoin(request.host_url, target))
+        return test.scheme in ('http', 'https') and ref.netloc == test.netloc
+    _next = request.args.get('next', '')
+    next_url = _next if (_next and _is_safe_url(_next)) else url_for('main.dashboard')
 
     if not email or not password:
         flash('이메일/비밀번호 입력', 'danger')

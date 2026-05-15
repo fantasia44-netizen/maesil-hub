@@ -7,7 +7,10 @@ load_dotenv()
 
 class Config:
     # ── Flask ──
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-only-change-me')
+    _secret = os.environ.get('SECRET_KEY', '').strip()
+    if not _secret:
+        raise RuntimeError('SECRET_KEY 환경변수가 설정되지 않았습니다. .env를 확인하세요.')
+    SECRET_KEY = _secret
     APP_ENV = os.environ.get('APP_ENV', 'development')
     DEBUG = APP_ENV == 'development'
 
@@ -37,7 +40,14 @@ class Config:
     PORTONE_WEBHOOK_SECRET = os.environ.get('PORTONE_WEBHOOK_SECRET', '')
 
     # ── Fernet (saas_config 암호화) ──
-    FERNET_KEY = os.environ.get('FERNET_KEY', '')
+    FERNET_KEY = os.environ.get('FERNET_KEY', '').strip()
+    if not FERNET_KEY:
+        import warnings
+        warnings.warn(
+            'FERNET_KEY 미설정 — saas_config 비밀값이 평문으로 저장됩니다. '
+            '운영 환경에서는 반드시 설정하세요: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"',
+            RuntimeWarning, stacklevel=2,
+        )
 
     # ── 파일 저장 경로 ──
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))

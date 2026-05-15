@@ -39,6 +39,21 @@ class HubUser(UserMixin):
         return True
 
     @property
+    def username(self):
+        """감사 로그·템플릿용 표시명 (email 앞부분)."""
+        return self._row.get('name') or self.email.split('@')[0]
+
+    def is_admin(self):
+        """admin 역할 여부 — 슈퍼어드민은 항상 True."""
+        if self.is_super_admin:
+            return True
+        from flask import g
+        try:
+            return g.get('user_role', '') in ('admin', 'owner')
+        except RuntimeError:
+            return False
+
+    @property
     def role(self):
         """현재 세션 biz의 역할. 슈퍼어드민은 항상 admin."""
         if self.is_super_admin:

@@ -213,7 +213,10 @@
   {% if g.is_impersonating %}
   <div class="impersonate-banner">
     ⚠️ 슈퍼어드민 위장 중 (biz_id={{ g.biz_id }}) —
-    <a href="{{ url_for('admin_saas.stop_impersonate') }}">원래 화면으로</a>
+    <form method="POST" action="{{ url_for('admin_saas.stop_impersonate') }}" style="display:inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn btn-sm btn-link p-0 text-dark">원래 화면으로</button>
+    </form>
   </div>
   {% endif %}
 

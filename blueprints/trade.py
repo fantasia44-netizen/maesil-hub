@@ -308,8 +308,11 @@ def trades():
     """거래 목록"""
     db = get_db()
 
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
+    from services.tz_utils import today_kst
+    _today = today_kst()
+    _month_start = _today[:8] + '01'
+    date_from = request.args.get('date_from', '') or _month_start
+    date_to = request.args.get('date_to', '') or _today
     partner_name = request.args.get('partner_name', '전체')
 
     trade_list = []

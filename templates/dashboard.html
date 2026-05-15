@@ -1,47 +1,82 @@
 {% extends "base.html" %}
-{% block title %}대시보드 — 매실 허브{% endml %}{% endblock %}
+{% block title %}대시보드 — 매실 허브{% endblock %}
 {% block content %}
 <div class="row g-3 mt-2">
-  <div class="col-12">
-    <h2>대시보드</h2>
-    <p class="text-muted">현재 회사: biz_id {{ biz_id }} (Phase 0 — 기본 화면)</p>
+  <div class="col-12 d-flex align-items-center justify-content-between">
+    <h4 class="mb-0">📊 대시보드</h4>
+    <span class="text-muted small">{{ today }} 기준</span>
   </div>
 
   <div class="col-md-3">
-    <div class="card border-primary">
+    <div class="card border-primary h-100">
       <div class="card-body">
         <h6 class="text-muted small">오늘 주문</h6>
-        <div class="fs-3 fw-bold text-primary">- 건</div>
+        <div class="fs-2 fw-bold text-primary">
+          {% if today_orders == '-' %}-{% else %}{{ "{:,}".format(today_orders) }}{% endif %}
+          <span class="fs-6 fw-normal">건</span>
+        </div>
       </div>
     </div>
   </div>
   <div class="col-md-3">
-    <div class="card border-success">
+    <div class="card border-danger h-100">
       <div class="card-body">
         <h6 class="text-muted small">미출고</h6>
-        <div class="fs-3 fw-bold text-success">- 건</div>
+        <div class="fs-2 fw-bold text-danger">
+          {% if pending_ship == '-' %}-{% else %}{{ "{:,}".format(pending_ship) }}{% endif %}
+          <span class="fs-6 fw-normal">건</span>
+        </div>
       </div>
     </div>
   </div>
   <div class="col-md-3">
-    <div class="card border-warning">
+    <div class="card border-warning h-100">
       <div class="card-body">
         <h6 class="text-muted small">재고 품목</h6>
-        <div class="fs-3 fw-bold text-warning">- 종</div>
+        <div class="fs-2 fw-bold text-warning">
+          {% if stock_items == '-' %}-{% else %}{{ "{:,}".format(stock_items) }}{% endif %}
+          <span class="fs-6 fw-normal">종</span>
+        </div>
       </div>
     </div>
   </div>
   <div class="col-md-3">
-    <div class="card border-info">
+    <div class="card border-success h-100">
       <div class="card-body">
-        <h6 class="text-muted small">이달 매출</h6>
-        <div class="fs-3 fw-bold text-info">- 원</div>
+        <h6 class="text-muted small">이달 정산매출</h6>
+        <div class="fs-2 fw-bold text-success">
+          {% if month_revenue == '-' %}-{% else %}{{ "{:,}".format(month_revenue) }}{% endif %}
+          <span class="fs-6 fw-normal">원</span>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
-<div class="alert alert-info mt-4">
-  <strong>Phase 0 진행 중</strong> — 데이터 연결 + 화면 구현은 Phase 2부터 본격 시작.
+<div class="row g-3 mt-2">
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header fw-bold">빠른 메뉴</div>
+      <div class="card-body">
+        <div class="d-flex flex-wrap gap-2">
+          <a href="/orders" class="btn btn-outline-primary btn-sm">📦 주문관리</a>
+          <a href="/stock" class="btn btn-outline-warning btn-sm">🗂 수불장</a>
+          <a href="/shipment" class="btn btn-outline-danger btn-sm">🚚 출고관리</a>
+          <a href="/revenue" class="btn btn-outline-success btn-sm">💰 매출분석</a>
+          <a href="/products" class="btn btn-outline-secondary btn-sm">🏷 상품관리</a>
+          <a href="/packing" class="btn btn-outline-info btn-sm">📫 패킹센터</a>
+          <a href="/purchase" class="btn btn-outline-dark btn-sm">🛒 발주관리</a>
+          <a href="/partners" class="btn btn-outline-secondary btn-sm">🤝 거래처</a>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+  .card { transition: box-shadow .15s; }
+  .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+</style>
 {% endblock %}

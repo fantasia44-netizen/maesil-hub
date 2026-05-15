@@ -262,7 +262,7 @@ def stats():
     category = request.args.get('category', '전체')
 
     stats_data = None
-    if date_from or date_to:
+    if True:  # always load with default dates
         try:
             from services.revenue_service import get_revenue_stats
             stats_data = get_revenue_stats(

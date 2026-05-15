@@ -22,7 +22,8 @@ stock_bp = Blueprint('stock', __name__, url_prefix='/stock')
 @role_required('admin', 'ceo', 'manager', 'sales', 'logistics', 'production', 'general')
 def index():
     """재고 현황 조회"""
-    date_str = request.args.get('date', '')
+    from services.tz_utils import today_kst
+    date_str = request.args.get('date', '') or today_kst()
     location = request.args.get('location', '전체')
     category = request.args.get('category', '전체')
     food_type_filter = request.args.get('food_type', '전체')

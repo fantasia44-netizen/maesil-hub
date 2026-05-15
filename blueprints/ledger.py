@@ -29,9 +29,13 @@ ledger_bp = Blueprint('ledger', __name__, url_prefix='/ledger')
 def index():
     """수불장 조회"""
     db = get_db()
+    from services.tz_utils import today_kst
+    from datetime import datetime, timedelta
+    _today = today_kst()
+    _month_start = _today[:8] + '01'
 
-    date_from = request.args.get('date_from', '')
-    date_to = request.args.get('date_to', '')
+    date_from = request.args.get('date_from', '') or _month_start
+    date_to = request.args.get('date_to', '') or _today
     location = request.args.get('location', '전체')
     ledger_type = request.args.get('ledger_type', '')
     product_search = request.args.get('product_search', '').strip()

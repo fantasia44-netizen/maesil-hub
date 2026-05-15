@@ -5986,11 +5986,13 @@ class SupabaseDB(DBBase):
 
     def query_work_logs(self, page=1, per_page=50, action_filter=None,
                         user_filter=None, channel_filter=None,
-                        category_filter=None, date_from=None, date_to=None):
-        """작업 이력 페이지네이션 조회. Returns: (items, total_count)."""
+                        category_filter=None, date_from=None, date_to=None,
+                        biz_id=None):
+        """작업 이력 페이지네이션 조회. Returns: (items, total_count). biz_id 테넌트 격리."""
+        biz_id = self._resolve_biz_id(biz_id)
         try:
-            count_q = self.client.table("work_logs").select("id", count="exact")
-            data_q = self.client.table("work_logs").select("*").order("created_at", desc=True)
+            count_q = self._with_biz(self.client.table("work_logs").select("id", count="exact"), biz_id)
+            data_q = self._with_biz(self.client.table("work_logs").select("*").order("created_at", desc=True), biz_id)
             for q_ref in (count_q, data_q):
                 if action_filter:
                     q_ref = q_ref.ilike("action", f"%{action_filter}%")
@@ -6005,8 +6007,8 @@ class SupabaseDB(DBBase):
                 if date_to:
                     q_ref = q_ref.lte("created_at", date_to + 'T23:59:59')
             # re-apply filters (postgrest builder is mutable)
-            count_q2 = self.client.table("work_logs").select("id", count="exact")
-            data_q2 = self.client.table("work_logs").select("*").order("created_at", desc=True)
+            count_q2 = self._with_biz(self.client.table("work_logs").select("id", count="exact"), biz_id)
+            data_q2 = self._with_biz(self.client.table("work_logs").select("*").order("created_at", desc=True), biz_id)
             if action_filter:
                 count_q2 = count_q2.ilike("action", f"%{action_filter}%")
                 data_q2 = data_q2.ilike("action", f"%{action_filter}%")

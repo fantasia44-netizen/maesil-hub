@@ -511,7 +511,7 @@ const CSRF = '{{ csrf_token() }}';
 let currentPage = 1;
 const perPage = 50;
 
-// 오늘 날짜 기본값
+// 오늘 날짜 기본값 + 자동 조회
 document.addEventListener('DOMContentLoaded', () => {
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('filterDateTo').value = today;
@@ -529,6 +529,9 @@ document.addEventListener('DOMContentLoaded', () => {
         };
         document.getElementById('filterSearch').placeholder = ph[this.value] || '검색어 입력';
     });
+
+    // 페이지 진입 시 자동 조회 (최근 7일)
+    loadOrders();
 });
 
 function parseJsonSafe(res) {

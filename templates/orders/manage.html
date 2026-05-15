@@ -511,12 +511,30 @@ const CSRF = '{{ csrf_token() }}';
 let currentPage = 1;
 const perPage = 50;
 
-// 오늘 날짜 기본값 + 자동 조회
+// 오늘 날짜 기본값 + URL 파라미터 읽기 + 자동 조회
 document.addEventListener('DOMContentLoaded', () => {
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('filterDateTo').value = today;
     const week = new Date(); week.setDate(week.getDate() - 7);
     document.getElementById('filterDateFrom').value = week.toISOString().split('T')[0];
+
+    // URL 파라미터로 필터 자동 설정 (예: ?outbound=no_invoice 로 진입 시)
+    const urlParams = new URLSearchParams(window.location.search);
+    const pOutbound = urlParams.get('outbound');
+    if (pOutbound) {
+        const sel = document.getElementById('filterOutbound');
+        if ([...sel.options].some(o => o.value === pOutbound)) {
+            sel.value = pOutbound;
+        }
+    }
+    const pChannel = urlParams.get('channel');
+    if (pChannel) document.getElementById('filterChannel').value = pChannel;
+    const pStatus = urlParams.get('status');
+    if (pStatus) document.getElementById('filterStatus').value = pStatus;
+    const pDateFrom = urlParams.get('date_from');
+    if (pDateFrom) document.getElementById('filterDateFrom').value = pDateFrom;
+    const pDateTo = urlParams.get('date_to');
+    if (pDateTo) document.getElementById('filterDateTo').value = pDateTo;
 
     // 검색대상 변경 시 placeholder 업데이트
     document.getElementById('filterSearchField').addEventListener('change', function() {
@@ -530,7 +548,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('filterSearch').placeholder = ph[this.value] || '검색어 입력';
     });
 
-    // 페이지 진입 시 자동 조회 (최근 7일)
+    // 페이지 진입 시 자동 조회 (최근 7일, URL 파라미터 적용 후)
     loadOrders();
 });
 

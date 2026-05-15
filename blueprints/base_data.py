@@ -65,7 +65,8 @@ def reset_base():
         flash(f'기존 재고 데이터 {deleted}건 삭제 완료', 'info')
 
         # 엑셀 파일이 있으면 기초재고로 등록
-        if file and file.filename and _allowed(file.filename):
+        from services.upload_utils import validate_excel_upload
+        if file and file.filename and validate_excel_upload(file)[0]:
             upload_dir = current_app.config['UPLOAD_FOLDER']
             os.makedirs(upload_dir, exist_ok=True)
             filename = secure_filename(file.filename)

@@ -393,8 +393,14 @@ def upload():
     excel_file = request.files.get('excel_file')
     auto_match = request.form.get('auto_match')
 
-    if not account_id or not excel_file:
-        flash('계좌와 엑셀 파일을 선택하세요.', 'danger')
+    if not account_id:
+        flash('계좌를 선택하세요.', 'danger')
+        return redirect(url_for('bank.upload'))
+
+    from services.upload_utils import validate_excel_upload
+    ok, err = validate_excel_upload(excel_file)
+    if not ok:
+        flash(err, 'danger')
         return redirect(url_for('bank.upload'))
 
     # 계좌 정보 확인

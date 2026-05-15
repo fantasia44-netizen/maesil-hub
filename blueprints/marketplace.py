@@ -1050,8 +1050,10 @@ def upload_rocket_settlement():
     db = get_db()
 
     f = request.files.get('file')
-    if not f or not f.filename:
-        return jsonify({'error': '파일을 선택하세요'}), 400
+    from services.upload_utils import validate_excel_upload
+    ok, err = validate_excel_upload(f)
+    if not ok:
+        return jsonify({'error': err}), 400
 
     try:
         file_bytes = f.read()
@@ -1227,8 +1229,10 @@ def upload_ad_cost():
     db = get_db()
 
     f = request.files.get('file')
-    if not f or not f.filename:
-        return jsonify({'error': '파일을 선택하세요'}), 400
+    from services.upload_utils import validate_excel_upload
+    ok, err = validate_excel_upload(f)
+    if not ok:
+        return jsonify({'error': err}), 400
 
     try:
         wb = openpyxl.load_workbook(io.BytesIO(f.read()), read_only=True)
@@ -1401,6 +1405,12 @@ def upload_settlement():
         return jsonify({'error': '채널을 선택하세요'}), 400
     if not files or not files[0].filename:
         return jsonify({'error': '파일을 선택하세요'}), 400
+
+    from services.upload_utils import validate_excel_upload
+    for _f in files:
+        _ok, _err = validate_excel_upload(_f)
+        if not _ok:
+            return jsonify({'error': _err}), 400
 
     # 월별 집계 채널: 복수 파일 합산이 필요한 채널
     MERGE_CHANNELS = ('쿠팡', '11번가', '오아시스')

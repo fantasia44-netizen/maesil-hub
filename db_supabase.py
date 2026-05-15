@@ -5287,11 +5287,12 @@ class SupabaseDB(DBBase):
 
     # ── bank_accounts ──
 
-    def query_bank_accounts(self):
-        """은행 계좌 전체 조회."""
+    def query_bank_accounts(self, biz_id=None):
+        """은행 계좌 전체 조회. biz_id 테넌트 격리 (tenant_guard 자동 주입)."""
         try:
-            res = self.client.table("bank_accounts") \
-                .select("*").or_("is_deleted.is.null,is_deleted.eq.false").order("bank_name").execute()
+            q = self.client.table("bank_accounts") \
+                .select("*").or_("is_deleted.is.null,is_deleted.eq.false").order("bank_name")
+            res = self._with_biz(q, biz_id).execute()
             return res.data or []
         except Exception as e:
             print(f"[DB] query_bank_accounts error: {e}")
@@ -5327,14 +5328,16 @@ class SupabaseDB(DBBase):
 
     def query_bank_transactions(self, date_from=None, date_to=None,
                                  bank_account_id=None, transaction_type=None,
-                                 category=None, unmatched_only=False):
-        """은행 거래내역 조회 (필터)."""
+                                 category=None, unmatched_only=False,
+                                 biz_id=None):
+        """은행 거래내역 조회 (필터). biz_id 테넌트 격리 (tenant_guard 자동 주입)."""
         try:
             q = self.client.table("bank_transactions") \
                 .select("*, bank_accounts(bank_name, account_number)") \
                 .or_("is_deleted.is.null,is_deleted.eq.false") \
                 .order("transaction_date", desc=True) \
                 .order("transaction_time", desc=True)
+            q = self._with_biz(q, biz_id)
             if date_from:
                 q = q.gte("transaction_date", date_from)
             if date_to:
@@ -5788,12 +5791,14 @@ class SupabaseDB(DBBase):
 
     def query_journal_entries(self, date_from=None, date_to=None,
                               journal_type=None, status=None,
-                              ref_type=None, ref_id=None):
-        """전표 목록 조회."""
+                              ref_type=None, ref_id=None,
+                              biz_id=None):
+        """전표 목록 조회. biz_id 테넌트 격리 (tenant_guard 자동 주입)."""
         try:
             q = self.client.table("journal_entries") \
                 .select("*").order("journal_date", desc=True) \
                 .order("id", desc=True)
+            q = self._with_biz(q, biz_id)
             if date_from:
                 q = q.gte("journal_date", date_from)
             if date_to:

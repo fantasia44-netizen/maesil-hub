@@ -474,27 +474,34 @@ class SupabaseDB(DBBase):
             return self._with_biz(q, biz_id).order("id")
         return self._paginate_query("stock_ledger", builder)
 
-    def query_filter_options(self):
+    def query_filter_options(self, biz_id=None):
+        """위치/카테고리 목록 반환. biz_id로 테넌트 격리 (tenant_guard 자동 주입)."""
         def builder(table):
-            return self.client.table(table).select("location,category") \
+            q = self.client.table(table).select("location,category") \
                 .eq("status", "active").order("id")
+            return self._with_biz(q, biz_id)
         all_vals = self._paginate_query("stock_ledger", builder)
         locs = sorted(set(r['location'] for r in all_vals if r.get('location')))
         cats = sorted(set(r['category'] for r in all_vals if r.get('category')))
         return locs, cats
 
-    def query_product_categories(self):
+    def query_product_categories(self, biz_id=None):
         """stock_ledger에서 product_name → category 매핑 조회.
         가장 최근 레코드의 category를 사용.
         공백 포함/미포함 이름 모두 매핑하여 product_costs와의 호환성 보장.
+        biz_id로 테넌트 격리 (tenant_guard 자동 주입).
         Returns: {product_name: category} dict.
         """
         import logging
         logger = logging.getLogger(__name__)
         try:
+            _biz = biz_id  # closure용
             rows = self._paginate_query("stock_ledger",
-                lambda t: self.client.table(t).select("product_name,category")
-                    .eq("status", "active").order("id", desc=True))
+                lambda t: self._with_biz(
+                    self.client.table(t).select("product_name,category")
+                        .eq("status", "active").order("id", desc=True),
+                    _biz
+                ))
             cat_map = {}
             for r in rows:
                 name = (r.get('product_name') or '').strip()
@@ -514,18 +521,19 @@ class SupabaseDB(DBBase):
             logger.error(f"query_product_categories failed: {e}")
             return {}
 
-    def query_unique_product_names(self):
+    def query_unique_product_names(self, biz_id=None):
         """products + stock_ledger에서 고유 품목명+단위 목록 반환.
 
         products 테이블(마스터)을 우선 포함하고,
         stock_ledger의 양수 재고 품목도 합침.
+        biz_id로 테넌트 격리 (tenant_guard 자동 주입).
         """
         names_set = {}  # name → unit
 
         # 1. products 마스터 (신규 등록 포함)
         try:
-            res = self.client.table("products").select("product_name,unit") \
-                .order("product_name").execute()
+            q = self.client.table("products").select("product_name,unit").order("product_name")
+            res = self._with_biz(q, biz_id).execute()
             for r in (res.data or []):
                 name = r.get('product_name', '')
                 if name and name not in names_set:
@@ -534,9 +542,12 @@ class SupabaseDB(DBBase):
             pass
 
         # 2. stock_ledger (양수 재고)
+        _biz = biz_id  # closure용
         def builder(table):
-            return self.client.table(table).select("product_name,qty,unit") \
-                .eq("status", "active").order("id")
+            return self._with_biz(
+                self.client.table(table).select("product_name,qty,unit").eq("status", "active").order("id"),
+                _biz
+            )
         all_data = self._paginate_query("stock_ledger", builder)
         totals = {}
         for r in all_data:
@@ -5355,13 +5366,15 @@ class SupabaseDB(DBBase):
 
     def query_tax_invoices(self, direction=None, status=None,
                             date_from=None, date_to=None,
-                            partner_name=None, unmatched_only=False):
-        """세금계산서 목록 조회."""
+                            partner_name=None, unmatched_only=False,
+                            biz_id=None):
+        """세금계산서 목록 조회. biz_id로 테넌트 격리 (tenant_guard 자동 주입)."""
         max_retries = 3
         for attempt in range(max_retries):
             try:
                 q = self.client.table("tax_invoices") \
                     .select("*").or_("is_deleted.is.null,is_deleted.eq.false").order("write_date", desc=True)
+                q = self._with_biz(q, biz_id)
                 if direction:
                     q = q.eq("direction", direction)
                 if status:

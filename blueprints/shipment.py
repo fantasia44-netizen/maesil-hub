@@ -54,9 +54,12 @@ def _call_rpc(db, date_from, date_to, location, product_filter):
 def index():
     """출고 내역 조회 — RPC 통합 조회 (3소스)"""
     db = get_db()
+    from services.tz_utils import today_kst
+    _today = today_kst()
+    _month_start = _today[:8] + '01'
 
-    date_from      = request.args.get('date_from', '')
-    date_to        = request.args.get('date_to', '')
+    date_from      = request.args.get('date_from', '') or _month_start
+    date_to        = request.args.get('date_to', '') or _today
     location       = request.args.get('location', '전체')
     product_filter = request.args.get('product', '').strip()
 
@@ -70,7 +73,7 @@ def index():
     rows  = []
     stats = {'total_items': 0, 'total_qty': 0, 'total_count': 0}
 
-    if date_from or date_to:
+    if True:  # always load with default dates
         effective_from = date_from or date_to
         effective_to   = date_to   or date_from
 
@@ -157,8 +160,11 @@ def export():
 @role_required('admin', 'ceo', 'manager', 'sales', 'logistics', 'general')
 def stats():
     """출고 통계 + 그래프"""
-    date_from = request.args.get('date_from', '')
-    date_to   = request.args.get('date_to', '')
+    from services.tz_utils import today_kst
+    _today = today_kst()
+    _month_start = _today[:8] + '01'
+    date_from = request.args.get('date_from', '') or _month_start
+    date_to   = request.args.get('date_to', '') or _today
     location  = request.args.get('location', '전체')
 
     locations = []
@@ -169,7 +175,7 @@ def stats():
         pass
 
     stats_data = None
-    if date_from or date_to:
+    if True:  # always load with default dates
         try:
             from services.shipment_stats_service import get_shipment_stats
             stats_data = get_shipment_stats(

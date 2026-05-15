@@ -53,7 +53,7 @@ def index():
     logger.info(f"[수불장조회] {user_name} | {date_from}~{date_to} | {location} | {ledger_type or '전체'}")
 
     ledger_rows = []
-    if date_from or date_to:
+    if True:  # always load with default dates
         try:
             from services.stock_service import query_ledger_data
 

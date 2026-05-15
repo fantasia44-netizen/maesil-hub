@@ -334,8 +334,10 @@ def survey_preview():
         return jsonify({'ok': False, 'error': 'openpyxl 미설치'}), 500
 
     f = request.files.get('file')
-    if not f or not f.filename.endswith(('.xlsx', '.xls')):
-        return jsonify({'ok': False, 'error': '엑셀 파일(.xlsx)을 선택해주세요.'})
+    from services.upload_utils import validate_excel_upload
+    ok, err = validate_excel_upload(f)
+    if not ok:
+        return jsonify({'ok': False, 'error': err})
 
     survey_date = request.form.get('survey_date', '').strip()
     location_filter = request.form.get('location', '').strip()

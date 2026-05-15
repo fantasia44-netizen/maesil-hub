@@ -353,13 +353,11 @@ def employees_template():
 @role_required('admin', 'general')
 def api_bulk_upload_employees():
     """직원 엑셀 일괄 등록."""
-    if 'file' not in request.files:
-        return jsonify({'error': '파일이 없습니다.'}), 400
-    f = request.files['file']
-    if not f.filename:
-        return jsonify({'error': '파일명이 없습니다.'}), 400
-    if not f.filename.lower().endswith(('.xlsx', '.xls')):
-        return jsonify({'error': 'Excel 파일(.xlsx, .xls)만 업로드 가능합니다.'}), 400
+    f = request.files.get('file')
+    from services.upload_utils import validate_excel_upload
+    ok, err = validate_excel_upload(f)
+    if not ok:
+        return jsonify({'error': err}), 400
 
     try:
         from openpyxl import load_workbook

@@ -65,8 +65,10 @@ def sync_price():
     def _n(t): return unicodedata.normalize('NFC', str(t).strip())
 
     file = request.files.get('file')
-    if not file or not _allowed(file.filename):
-        flash('엑셀 파일(.xlsx/.xls)을 선택하세요.', 'danger')
+    from services.upload_utils import validate_excel_upload
+    ok, err = validate_excel_upload(file)
+    if not ok:
+        flash(err, 'danger')
         return redirect(url_for('master.index'))
 
     upload_dir = current_app.config['UPLOAD_FOLDER']
@@ -146,8 +148,10 @@ def sync_bom():
 def sync_option():
     """옵션마스터 동기화 (옵션리스트 엑셀 → option_master 테이블)"""
     file = request.files.get('file')
-    if not file or not _allowed(file.filename):
-        flash('엑셀 파일(.xlsx/.xls)을 선택하세요.', 'danger')
+    from services.upload_utils import validate_excel_upload
+    ok, err = validate_excel_upload(file)
+    if not ok:
+        flash(err, 'danger')
         return redirect(url_for('master.index'))
 
     upload_dir = current_app.config['UPLOAD_FOLDER']
@@ -212,8 +216,10 @@ def sync_option():
 def _sync_master(key, table_name, label):
     """공통 마스터 동기화 로직"""
     file = request.files.get('file')
-    if not file or not _allowed(file.filename):
-        flash('엑셀 파일(.xlsx/.xls)을 선택하세요.', 'danger')
+    from services.upload_utils import validate_excel_upload
+    ok, err = validate_excel_upload(file)
+    if not ok:
+        flash(err, 'danger')
         return redirect(url_for('master.index'))
 
     upload_dir = current_app.config['UPLOAD_FOLDER']

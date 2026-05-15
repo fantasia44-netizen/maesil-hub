@@ -179,15 +179,32 @@ def create_app():
             except Exception:
                 stock_items = '-'
 
-        # 이달 매출
+        # 이달 매출 (RPC 우선)
         try:
-            r = c.table('order_transactions').select('settlement') \
-                .eq('biz_id', biz_id) \
-                .gte('order_date', month_start).lte('order_date', today) \
-                .neq('status', '취소').limit(5000).execute()
-            month_revenue = sum(x.get('settlement') or 0 for x in (r.data or []))
+            r = c.rpc('get_revenue_summary_agg', {
+                'p_date_from': month_start,
+                'p_date_to': today,
+                'p_category': None,
+            }).execute()
+            _s = r.data[0] if (r.data and isinstance(r.data, list)) else (r.data or {})
+            month_revenue = int(_s.get('total_settlement', 0) or 0)
         except Exception:
-            month_revenue = '-'
+            try:
+                r = c.table('order_transactions').select('settlement') \
+                    .eq('biz_id', biz_id) \
+                    .gte('order_date', month_start).lte('order_date', today) \
+                    .neq('status', '취소').limit(5000).execute()
+                month_revenue = sum(x.get('settlement') or 0 for x in (r.data or []))
+            except Exception:
+                month_revenue = '-'
+
+        # 7일 매출 추이 (스파크라인용)
+        revenue_trend = []
+        try:
+            from db_utils import get_db
+            revenue_trend = get_db().query_revenue_trend(days=7, biz_id=biz_id)
+        except Exception:
+            pass
 
         return render_template('dashboard.html',
             biz_id=biz_id,
@@ -196,6 +213,7 @@ def create_app():
             pending_ship=pending_ship,
             stock_items=stock_items,
             month_revenue=month_revenue,
+            revenue_trend=revenue_trend,
         )
 
     app.register_blueprint(main_bp)

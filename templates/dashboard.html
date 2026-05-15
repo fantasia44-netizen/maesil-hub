@@ -1,72 +1,114 @@
 {% extends "base.html" %}
 {% block title %}대시보드 — 매실 허브{% endblock %}
-{% block content %}
-<div class="row g-3 mt-2">
-  <div class="col-12 d-flex align-items-center justify-content-between">
-    <h4 class="mb-0">📊 대시보드</h4>
-    <span class="text-muted small">{{ today }} 기준</span>
-  </div>
 
-  <div class="col-md-3">
-    <div class="card border-primary h-100">
-      <div class="card-body">
-        <h6 class="text-muted small">오늘 주문</h6>
-        <div class="fs-2 fw-bold text-primary">
-          {% if today_orders == '-' %}-{% else %}{{ "{:,}".format(today_orders) }}{% endif %}
-          <span class="fs-6 fw-normal">건</span>
+{% block extra_head %}
+<style>
+  .kpi-card { transition: box-shadow .15s; cursor: default; }
+  .kpi-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+  .kpi-label { font-size: 12px; color: #6c757d; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+  .kpi-value { font-size: 2rem; font-weight: 700; line-height: 1.1; }
+  .kpi-unit { font-size: 14px; font-weight: 400; color: #6c757d; }
+  #revChart { height: 60px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 헤더 -->
+<div class="d-flex align-items-center justify-content-between mt-1 mb-3">
+  <h5 class="mb-0 fw-bold"><i class="bi bi-speedometer2 text-success"></i> 대시보드</h5>
+  <span class="text-muted small"><i class="bi bi-calendar3"></i> {{ today }} 기준</span>
+</div>
+
+<!-- KPI 카드 -->
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3">
+    <a href="/orders/" class="text-decoration-none">
+      <div class="card kpi-card border-primary h-100">
+        <div class="card-body py-3">
+          <div class="kpi-label"><i class="bi bi-bag-check text-primary"></i> 오늘 주문</div>
+          <div class="kpi-value text-primary mt-1">
+            {% if today_orders == '-' %}-{% else %}{{ "{:,}".format(today_orders) }}{% endif %}
+            <span class="kpi-unit">건</span>
+          </div>
         </div>
       </div>
-    </div>
+    </a>
   </div>
-  <div class="col-md-3">
-    <div class="card border-danger h-100">
-      <div class="card-body">
-        <h6 class="text-muted small">미출고</h6>
-        <div class="fs-2 fw-bold text-danger">
-          {% if pending_ship == '-' %}-{% else %}{{ "{:,}".format(pending_ship) }}{% endif %}
-          <span class="fs-6 fw-normal">건</span>
+  <div class="col-6 col-md-3">
+    <a href="/orders/?outbound=not_done" class="text-decoration-none">
+      <div class="card kpi-card border-danger h-100">
+        <div class="card-body py-3">
+          <div class="kpi-label"><i class="bi bi-clock-history text-danger"></i> 미출고</div>
+          <div class="kpi-value text-danger mt-1">
+            {% if pending_ship == '-' %}-{% else %}{{ "{:,}".format(pending_ship) }}{% endif %}
+            <span class="kpi-unit">건</span>
+          </div>
         </div>
       </div>
-    </div>
+    </a>
   </div>
-  <div class="col-md-3">
-    <div class="card border-warning h-100">
-      <div class="card-body">
-        <h6 class="text-muted small">재고 품목</h6>
-        <div class="fs-2 fw-bold text-warning">
-          {% if stock_items == '-' %}-{% else %}{{ "{:,}".format(stock_items) }}{% endif %}
-          <span class="fs-6 fw-normal">종</span>
+  <div class="col-6 col-md-3">
+    <a href="/stock/" class="text-decoration-none">
+      <div class="card kpi-card border-warning h-100">
+        <div class="card-body py-3">
+          <div class="kpi-label"><i class="bi bi-archive text-warning"></i> 재고 품목</div>
+          <div class="kpi-value text-warning mt-1">
+            {% if stock_items == '-' %}-{% else %}{{ "{:,}".format(stock_items) }}{% endif %}
+            <span class="kpi-unit">종</span>
+          </div>
         </div>
       </div>
-    </div>
+    </a>
   </div>
-  <div class="col-md-3">
-    <div class="card border-success h-100">
-      <div class="card-body">
-        <h6 class="text-muted small">이달 정산매출</h6>
-        <div class="fs-2 fw-bold text-success">
-          {% if month_revenue == '-' %}-{% else %}{{ "{:,}".format(month_revenue) }}{% endif %}
-          <span class="fs-6 fw-normal">원</span>
+  <div class="col-6 col-md-3">
+    <a href="/revenue/" class="text-decoration-none">
+      <div class="card kpi-card border-success h-100">
+        <div class="card-body py-3">
+          <div class="kpi-label"><i class="bi bi-currency-won text-success"></i> 이달 정산매출</div>
+          <div class="kpi-value text-success mt-1">
+            {% if month_revenue == '-' %}-{% else %}{{ "{:,}".format(month_revenue) }}{% endif %}
+            <span class="kpi-unit">원</span>
+          </div>
         </div>
       </div>
-    </div>
+    </a>
   </div>
 </div>
 
-<div class="row g-3 mt-2">
+<!-- 매출 트렌드 + 빠른 메뉴 -->
+<div class="row g-3">
+  {% if revenue_trend %}
+  <div class="col-md-8">
+    <div class="card h-100">
+      <div class="card-header d-flex justify-content-between align-items-center py-2">
+        <span class="fw-semibold small"><i class="bi bi-graph-up-arrow text-success"></i> 최근 7일 매출 추이</span>
+        <a href="/revenue/" class="btn btn-outline-success btn-sm py-0 px-2" style="font-size:12px">상세보기</a>
+      </div>
+      <div class="card-body py-2">
+        <canvas id="revChart"></canvas>
+        <div class="d-flex justify-content-between mt-1">
+          {% for d in revenue_trend %}
+          <small class="text-muted" style="font-size:10px">{{ d.date[-5:] if d.date else '' }}</small>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-4">
+  {% else %}
   <div class="col-12">
-    <div class="card">
-      <div class="card-header fw-bold">빠른 메뉴</div>
-      <div class="card-body">
-        <div class="d-flex flex-wrap gap-2">
-          <a href="/orders/" class="btn btn-outline-primary btn-sm"><i class="bi bi-bag-check"></i> 주문관리</a>
-          <a href="/outbound/" class="btn btn-outline-danger btn-sm"><i class="bi bi-box-arrow-right"></i> 출고처리</a>
-          <a href="/shipment/" class="btn btn-outline-warning btn-sm"><i class="bi bi-truck"></i> 출고관리</a>
-          <a href="/stock/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-archive"></i> 수불장</a>
-          <a href="/revenue/" class="btn btn-outline-success btn-sm"><i class="bi bi-bar-chart-line"></i> 매출분석</a>
-          <a href="/master/" class="btn btn-outline-secondary btn-sm"><i class="bi bi-tags"></i> 상품마스터</a>
-          <a href="/packing/" class="btn btn-outline-info btn-sm"><i class="bi bi-box-seam"></i> 패킹센터</a>
-          <a href="/trade/" class="btn btn-outline-dark btn-sm"><i class="bi bi-cart3"></i> 발주관리</a>
+  {% endif %}
+    <div class="card h-100">
+      <div class="card-header fw-semibold small py-2"><i class="bi bi-grid-3x3-gap"></i> 빠른 메뉴</div>
+      <div class="card-body py-2">
+        <div class="d-grid gap-2">
+          <a href="/orders/" class="btn btn-outline-primary btn-sm text-start"><i class="bi bi-bag-check me-2"></i>주문관리</a>
+          <a href="/outbound/" class="btn btn-outline-danger btn-sm text-start"><i class="bi bi-box-arrow-right me-2"></i>출고처리</a>
+          <a href="/shipment/" class="btn btn-outline-warning btn-sm text-start"><i class="bi bi-truck me-2"></i>출고관리</a>
+          <a href="/stock/" class="btn btn-outline-secondary btn-sm text-start"><i class="bi bi-archive me-2"></i>수불장(재고)</a>
+          <a href="/revenue/" class="btn btn-outline-success btn-sm text-start"><i class="bi bi-bar-chart-line me-2"></i>매출분석</a>
+          <a href="/packing/" class="btn btn-outline-info btn-sm text-start"><i class="bi bi-box-seam me-2"></i>패킹센터</a>
+          <a href="/trade/" class="btn btn-outline-dark btn-sm text-start"><i class="bi bi-cart3 me-2"></i>발주관리</a>
         </div>
       </div>
     </div>
@@ -74,9 +116,52 @@
 </div>
 {% endblock %}
 
-{% block extra_head %}
-<style>
-  .card { transition: box-shadow .15s; }
-  .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,.1); }
-</style>
+{% block extra_js %}
+{% if revenue_trend %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+  const trend = {{ revenue_trend | tojson }};
+  const labels = trend.map(d => d.date ? d.date.slice(5) : '');
+  const settlements = trend.map(d => d.settlement || 0);
+  const ctx = document.getElementById('revChart').getContext('2d');
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: '정산매출',
+        data: settlements,
+        backgroundColor: 'rgba(45,122,62,0.7)',
+        borderColor: '#2d7a3e',
+        borderWidth: 1,
+        borderRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => (ctx.parsed.y || 0).toLocaleString() + '원'
+          }
+        }
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+        y: {
+          grid: { color: 'rgba(0,0,0,.05)' },
+          ticks: {
+            font: { size: 10 },
+            callback: v => v >= 1000000 ? (v/1000000).toFixed(1)+'M' : v >= 1000 ? (v/1000).toFixed(0)+'K' : v
+          }
+        }
+      }
+    }
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

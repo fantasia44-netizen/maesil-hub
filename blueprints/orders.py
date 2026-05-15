@@ -89,16 +89,21 @@ def _import_option_file_to_db(filepath):
 @orders_bp.route('/')
 @role_required('admin', 'manager', 'sales')
 def index():
-    """온라인주문처리 업로드 폼"""
+    """주문관리 메인 → 주문목록(manage)으로 이동"""
+    from flask import redirect, url_for
+    return redirect(url_for('orders.manage'))
+
+
+@orders_bp.route('/upload')
+@role_required('admin', 'manager', 'sales')
+def upload():
+    """온라인주문처리 업로드 폼 (엑셀 업로드)"""
     output_dir = current_app.config['OUTPUT_FOLDER']
     result_files = _get_result_files(output_dir)
-
-    # 옵션마스터 DB 건수 표시
     try:
         option_count = get_db().count_option_master()
     except Exception:
         option_count = 0
-
     return render_template('orders/index.html',
                            result_files=result_files,
                            option_count=option_count)

@@ -2614,20 +2614,29 @@ class SupabaseDB(DBBase):
                     txn["import_run_id"] = import_run_id
                     to_insert.append((txn, i))
 
-                # shipping 수집
-                if ship and ship.get("name"):
+                # shipping 수집 (hub 스키마: recipient_name/recipient_phone)
+                if ship and (ship.get("recipient_name") or ship.get("name")):
                     ship_data = {
-                        "channel": txn.get("channel", ""),
-                        "order_no": txn.get("order_no", ""),
-                        **{k: v for k, v in ship.items() if k not in ("channel", "order_no")},
-                        "expires_at": (datetime.now(timezone.utc) + timedelta(days=180)).isoformat(),
+                        "channel":         txn.get("channel", ""),
+                        "order_no":        txn.get("order_no", ""),
+                        "recipient_name":  ship.get("recipient_name") or ship.get("name", ""),
+                        "recipient_phone": ship.get("recipient_phone") or ship.get("phone", ""),
+                        "address":         ship.get("address", ""),
+                        "invoice_no":      ship.get("invoice_no") or "",
+                        "courier":         ship.get("courier") or "",
+                        "shipping_status": ship.get("shipping_status", "접수"),
                     }
+                    if biz_id is not None:
+                        ship_data["biz_id"] = biz_id
                     ship_batch.append(ship_data)
 
             # 3단계: 배치 INSERT
+            # hub 스키마에 없는 컬럼 제거 (order_datetime, shipping_fee 등)
+            _DROP_COLS = {"order_datetime", "shipping_fee", "phone2", "memo"}
             if to_insert:
                 try:
-                    rows = [t[0] for t in to_insert]
+                    rows = [{k: v for k, v in t[0].items() if k not in _DROP_COLS}
+                            for t in to_insert]
                     self.client.table("order_transactions").insert(rows).execute()
                     inserted += len(rows)
                 except Exception as e:
@@ -2652,18 +2661,19 @@ class SupabaseDB(DBBase):
                     if failed <= 3:
                         print(f"[DB] fallback update row {row_i}: {str(e)[:200]}")
 
-            # 5단계: shipping 배치 upsert
+            # 5단계: shipping 배치 upsert (hub: UNIQUE(biz_id, channel, order_no))
             if ship_batch:
+                conflict_key = "biz_id,channel,order_no" if biz_id is not None else "channel,order_no"
                 try:
                     self.client.table("order_shipping").upsert(
-                        ship_batch, on_conflict="channel,order_no"
+                        ship_batch, on_conflict=conflict_key
                     ).execute()
                 except Exception:
                     # 배치 실패 시 개별 재시도
                     for sd in ship_batch:
                         try:
                             self.client.table("order_shipping").upsert(
-                                sd, on_conflict="channel,order_no"
+                                sd, on_conflict=conflict_key
                             ).execute()
                         except Exception:
                             pass

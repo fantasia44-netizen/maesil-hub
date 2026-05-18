@@ -1177,14 +1177,16 @@ class OrderProcessor:
             }
 
             # 개인정보 분리 (카카오는 배송정보 없음)
+            # hub 스키마: recipient_name, recipient_phone (name/phone 컬럼 없음)
             shipping = None
             if row.get('name'):
                 shipping = {
-                    "name": str(row.get('name', '')),
-                    "phone": str(row.get('p1', '')),
-                    "phone2": str(row.get('p2', '')),
-                    "address": str(row.get('addr', '')),
-                    "memo": str(row.get('msg', '')),
+                    "channel":          channel,
+                    "order_no":         order_no,
+                    "recipient_name":   str(row.get('name', '')),
+                    "recipient_phone":  str(row.get('p1', '')),
+                    "address":          str(row.get('addr', '')),
+                    "shipping_status":  "접수",
                 }
                 # 송장번호/택배사 (카카오 등 채널에서 제공 시)
                 _inv = str(row.get('_invoice_no', '')).strip()

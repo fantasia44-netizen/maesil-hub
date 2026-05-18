@@ -54,6 +54,54 @@ DROP_ID_ON_INSERT = True
 
 PAGE_SIZE = 1000
 
+# ── 테이블별 컬럼 매핑 (source명 → dst명) ─────────────────────────────
+# total 스키마와 hub 스키마의 컬럼명 차이를 보정한다.
+COLUMN_REMAP = {
+    'business_partners': {
+        'business_number': 'biz_reg_no',
+        'contact_person':  'contact_name',
+        'phone':           'contact_phone',    # contact1 fallback은 아래서 처리
+        'email':           'contact_email',
+        'notes':           'memo',
+        'type':            'partner_type',
+        # drop: business_item, contact1, contact2, fax
+    },
+    'my_business': {
+        'business_name': 'name',
+        'business_number': 'biz_reg_no',
+        'contact':       'contact_phone',
+        'email':         'contact_email',
+        # drop: fax
+    },
+    'order_shipping': {
+        'name':  'recipient_name',
+        'phone': 'recipient_phone',
+        # drop: phone2, memo, invoice_no_clean, is_anonymized, anonymized_at
+        #       expires_at, delivery_status_raw, delivery_status_updated_at
+    },
+}
+
+# source에만 있는 컬럼 중 무시할 것들 (경고 없이 드롭)
+SILENT_DROP_COLS = {
+    'business_partners': {'contact1', 'contact2', 'fax', 'business_item', 'deleted_by'},
+    'my_business':       {'fax', 'deleted_by'},
+    'order_shipping':    {'phone2', 'invoice_no_clean', 'is_anonymized', 'anonymized_at',
+                          'expires_at', 'delivery_status_raw', 'delivery_status_updated_at',
+                          'memo'},
+    'option_master':     {'deleted_by'},
+    'packing_jobs':      {'company_name', 'product_name', 'recipient_name', 'scanned_barcode'},
+    'import_runs':       {'changed_count', 'error_summary', 'fail_count', 'success_count'},
+    'manual_trades':     {'partner_id'},
+    'daily_revenue':     {'deleted_by', 'invoice_no'},
+    'stock_ledger':      {'deleted_at', 'ref_event_uid', 'replaced_by', 'replaces',
+                          'result_lot', 'source_lot', 'updated_by', 'worker_id', 'updated_at'},
+    'order_transactions': {'order_datetime', 'processed_at', 'revenue_category',
+                           'shipping_fee', 'status_changed_at'},
+    'purchase_orders':   {'caution_text', 'delivery_note', 'invoice_manager', 'item_count',
+                          'manager_contact', 'my_biz_name', 'order_manager', 'partner_id',
+                          'registered_by', 'request_date'},
+}
+
 
 def get_clients():
     """source (maesil-total) + destination (maesil-hub) 클라이언트."""
@@ -184,6 +232,8 @@ def migrate_table(src, dst, table, dry_run=False):
                  'expected_date', 'received_date'}
 
     # 변환: id 제거 + biz_id 주입 + dst에 없는 컬럼 제거 + 빈 문자열 date → None
+    remap = COLUMN_REMAP.get(table, {})
+    silent_drop = SILENT_DROP_COLS.get(table, set())
     transformed = []
     dropped_cols = set()
     for r in rows:
@@ -191,19 +241,24 @@ def migrate_table(src, dst, table, dry_run=False):
         for k, v in r.items():
             if k == 'id' and DROP_ID_ON_INSERT:
                 continue
-            if k not in dst_cols:
+            # 컬럼명 리매핑
+            mapped_k = remap.get(k, k)
+            # 무음 드롭 (알려진 source-only 컬럼)
+            if k in silent_drop or mapped_k in silent_drop:
+                continue
+            if mapped_k not in dst_cols:
                 dropped_cols.add(k)
                 continue
             # 빈 문자열을 date/timestamp 컬럼에 넣으면 PostgreSQL fail
-            if k in DATE_COLS and (v == '' or v is None):
-                new[k] = None
+            if mapped_k in DATE_COLS and (v == '' or v is None):
+                new[mapped_k] = None
             else:
-                new[k] = v
+                new[mapped_k] = v
         new['biz_id'] = TARGET_BIZ_ID
         transformed.append(new)
 
     if dropped_cols:
-        print(f'  dropped source-only columns: {sorted(dropped_cols)[:10]}')
+        print(f'  [WARN] unmapped dropped cols: {sorted(dropped_cols)[:10]}')
 
     if dry_run:
         print(f'  [DRY-RUN] would insert {len(transformed)} rows')

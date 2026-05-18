@@ -5915,7 +5915,7 @@ class SupabaseDB(DBBase):
             payload['updated_at'] = datetime.now(timezone.utc).isoformat()
             self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
             self.client.table("marketplace_api_config").upsert(
-                payload, on_conflict="channel"
+                payload, on_conflict="biz_id,channel"
             ).execute()
         except Exception as e:
             print(f"[DB] upsert_marketplace_api_config error: {e}")
@@ -6092,7 +6092,7 @@ class SupabaseDB(DBBase):
             for attempt in range(3):
                 try:
                     self.client.table("api_orders").upsert(
-                        batch, on_conflict="channel,api_order_id,api_line_id"
+                        batch, on_conflict="biz_id,channel,api_order_id,api_line_id"
                     ).execute()
                     success = True
                     break
@@ -6205,7 +6205,7 @@ class SupabaseDB(DBBase):
             batch = settlements[i:i + batch_size]
             try:
                 self.client.table("api_settlements").upsert(
-                    batch, on_conflict="channel,settlement_date,settlement_id"
+                    batch, on_conflict="biz_id,channel,settlement_date,settlement_id"
                 ).execute()
             except Exception as e:
                 print(f"[DB] upsert_api_settlements_batch error: {e}")

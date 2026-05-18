@@ -150,8 +150,9 @@ def save_config(channel):
     db.upsert_marketplace_api_config(payload)
     _log_action(f'마켓플레이스 API 설정 저장: {channel}')
 
-    # 클라이언트 재로드
-    mgr._load_configs(db)
+    # 클라이언트 재로드 (현재 biz 채널만)
+    if hasattr(mgr, 'reload'):
+        mgr.reload(db=db, biz_id=g.biz_id)
 
     # 네이버 광고 클라이언트 재로드
     if is_naver(channel) and has_ad_keys:

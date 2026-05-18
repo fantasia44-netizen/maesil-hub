@@ -48,10 +48,12 @@ class MarketplaceRepo(BaseRepo):
     # --- business_partners ---
 
 
-    def query_marketplace_api_configs(self, channel=None):
-        """마켓플레이스 API 설정 조회."""
+    def query_marketplace_api_configs(self, channel=None, biz_id=None):
+        """마켓플레이스 API 설정 조회 (biz_id 필터 지원)."""
         try:
             q = self.client.table("marketplace_api_config").select("*")
+            if biz_id is not None:
+                q = q.eq("biz_id", biz_id)
             if channel:
                 q = q.eq("channel", channel)
             res = q.execute()
@@ -62,12 +64,12 @@ class MarketplaceRepo(BaseRepo):
 
 
     def upsert_marketplace_api_config(self, payload):
-        """마켓플레이스 API 설정 upsert."""
+        """마켓플레이스 API 설정 upsert (biz_id + channel UNIQUE)."""
         try:
             from datetime import datetime, timezone
             payload['updated_at'] = datetime.now(timezone.utc).isoformat()
             self.client.table("marketplace_api_config").upsert(
-                payload, on_conflict="channel"
+                payload, on_conflict="biz_id,channel"
             ).execute()
         except Exception as e:
             print(f"[DB] upsert_marketplace_api_config error: {e}")

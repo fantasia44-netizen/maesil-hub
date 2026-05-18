@@ -2474,10 +2474,13 @@ class SupabaseDB(DBBase):
             if ship and biz_id is not None:
                 ship.setdefault("biz_id", biz_id)
         try:
-            res = self.client.rpc("rpc_upsert_order_batch", {
+            rpc_params = {
                 "p_import_run_id": import_run_id,
                 "p_orders": orders,
-            }).execute()
+            }
+            if biz_id is not None:
+                rpc_params["p_biz_id"] = biz_id
+            res = self.client.rpc("rpc_upsert_order_batch", rpc_params).execute()
             if res.data:
                 return res.data
             return {"inserted": 0, "updated": 0, "skipped": 0, "failed": len(orders),

@@ -401,3 +401,50 @@ def join_invite(token: str):
                   user_id=user_id, biz_id=biz_id)
         biz_name = client.table('businesses').select('name') \
             .eq('id', biz_id).single().execute().data.get('name', str(biz_id))
+        flash(f'🎉 {biz_name} 팀에 합류했습니다! (역할: {_ROLE_LABELS.get(role, role)})', 'success')
+        session['current_biz_id'] = biz_id
+        return redirect(url_for('main.dashboard'))
+
+    # 알 수 없는 mode
+    flash('알 수 없는 요청입니다.', 'danger')
+    return redirect(url_for('auth.join_invite', token=token))
+
+
+# ─── 회사 선택 ───
+@auth_bp.route('/select-business', methods=['GET', 'POST'])
+@login_required
+def select_business():
+    """여러 사업자에 소속된 유저의 회사 선택 화면."""
+    client = get_admin_client()
+
+    if request.method == 'POST':
+        biz_id = request.form.get('biz_id', type=int)
+        if not biz_id:
+            flash('회사를 선택해주세요.', 'danger')
+            return redirect(url_for('auth.select_business'))
+        # 해당 user가 실제로 속한 biz인지 검증
+        check = client.table('user_business_map').select('id') \
+            .eq('user_id', current_user.id).eq('biz_id', biz_id).limit(1).execute()
+        if not check.data:
+            flash('접근 권한이 없는 사업자입니다.', 'danger')
+            return redirect(url_for('auth.select_business'))
+        session['current_biz_id'] = biz_id
+        return redirect(url_for('main.dashboard'))
+
+    # GET: 소속 사업자 목록 조회
+    ubm_rows = client.table('user_business_map').select('biz_id, role, is_primary') \
+        .eq('user_id', current_user.id).execute().data or []
+
+    if not ubm_rows:
+        flash('소속된 사업자가 없습니다. 관리자에게 초대를 요청하세요.', 'warning')
+        return redirect(url_for('auth.logout'))
+
+    biz_ids = [r['biz_id'] for r in ubm_rows]
+    biz_rows = client.table('businesses').select('id, name, industry') \
+        .in_('id', biz_ids).execute().data or []
+
+    ubm = {r['biz_id']: r for r in ubm_rows}
+
+    return render_template('auth/select_business.html',
+                           businesses=biz_rows,
+                           ubm=ubm)

@@ -265,6 +265,13 @@ def create_app():
         logging.warning(f'MarketplaceManager init failed: {e}')
         app._marketplace_default = None
 
+    # ─── 마켓플레이스 자동 수집 스케줄러 ───
+    try:
+        from services.sync_scheduler import start_sync_scheduler
+        start_sync_scheduler(app)
+    except Exception as e:
+        logging.warning(f'sync_scheduler 시작 실패: {e}')
+
     # ─── Tenant context ───
     @app.before_request
     def set_tenant_context():

@@ -177,6 +177,8 @@
        href="/price/"><i class="bi bi-tag"></i> 가격관리</a>
     <a class="nav-link {% if request.path.startswith('/base-data') %}active{% endif %}"
        href="/base-data/"><i class="bi bi-database"></i> 기초데이터</a>
+    <a class="nav-link {% if request.path.startswith('/settings/team') %}active{% endif %}"
+       href="{{ url_for('team.index') }}"><i class="bi bi-people"></i> 팀 관리</a>
 
     {% if current_user.is_super_admin %}
     <div class="menu-label">관리자</div>
@@ -203,8 +205,28 @@
         {% if g.biz_id %}
           <span class="biz-badge">{{ g.biz_name if g.biz_name else 'biz_id: ' ~ g.biz_id }}</span>
         {% endif %}
-        <span class="text-muted small">{{ current_user.name }}</span>
-        <a href="{{ url_for('auth.logout') }}" class="btn btn-sm btn-outline-secondary">로그아웃</a>
+        <div class="dropdown">
+          <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+            <i class="bi bi-person-circle me-1"></i>{{ current_user.name or current_user.email }}
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end">
+            {% if g.biz_id %}
+            <li><a class="dropdown-item" href="{{ url_for('team.index') }}"><i class="bi bi-people me-2"></i>팀 관리</a></li>
+            {% endif %}
+            <li><a class="dropdown-item" href="{{ url_for('auth.change_password') }}"><i class="bi bi-key me-2"></i>비밀번호 변경</a></li>
+            {% if current_user.is_super_admin %}
+            <li><hr class="dropdown-divider"></li>
+            <li><a class="dropdown-item text-warning" href="{{ url_for('admin_saas.dashboard') }}"><i class="bi bi-shield-lock me-2"></i>Super Admin</a></li>
+            {% endif %}
+            <li><hr class="dropdown-divider"></li>
+            <li>
+              <form method="POST" action="{{ url_for('auth.logout') }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="dropdown-item text-danger"><i class="bi bi-box-arrow-right me-2"></i>로그아웃</button>
+              </form>
+            </li>
+          </ul>
+        </div>
       {% else %}
         <a href="{{ url_for('auth.login') }}" class="btn btn-sm btn-outline-success">로그인</a>
         <a href="{{ url_for('auth.signup') }}" class="btn btn-sm btn-success">회원가입</a>

@@ -465,6 +465,17 @@ def sync_log():
     return render_template('marketplace/sync_log.html', logs=logs, channel=channel)
 
 
+@marketplace_bp.route('/api/sync-status')
+@login_required
+def api_sync_status():
+    """자동 수집 스케줄러 상태 (대시보드/모니터링용)."""
+    try:
+        from services.sync_scheduler import get_sync_status
+        return jsonify(get_sync_status())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @marketplace_bp.route('/validation')
 @role_required('admin', 'general')
 def validation():

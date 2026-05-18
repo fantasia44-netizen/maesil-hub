@@ -163,13 +163,47 @@ def login():
 
 
 # ─── 로그아웃 ───
-@auth_bp.route('/logout')
+@auth_bp.route('/logout', methods=['GET', 'POST'])
 @login_required
 def logout():
     log_audit('logout', user_id=current_user.id, biz_id=session.get('current_biz_id'))
     logout_user()
     session.clear()
     return redirect(url_for('main.index'))
+
+
+# ─── 비밀번호 변경 ───
+@auth_bp.route('/change-password', methods=['GET', 'POST'])
+@login_required
+def change_password():
+    if request.method == 'GET':
+        return render_template('auth/change_password.html')
+
+    current_pw = request.form.get('current_password', '')
+    new_pw     = request.form.get('new_password', '')
+    confirm_pw = request.form.get('confirm_password', '')
+
+    if len(new_pw) < 10:
+        flash('새 비밀번호는 최소 10자', 'danger')
+        return redirect(url_for('auth.change_password'))
+    if new_pw != confirm_pw:
+        flash('새 비밀번호가 일치하지 않습니다.', 'danger')
+        return redirect(url_for('auth.change_password'))
+
+    client = get_admin_client()
+    res = client.table('app_users').select('password_hash') \
+        .eq('id', current_user.id).single().execute()
+    if not res.data or not verify_password(current_pw, res.data['password_hash']):
+        flash('현재 비밀번호가 틀립니다.', 'danger')
+        return redirect(url_for('auth.change_password'))
+
+    client.table('app_users').update({
+        'password_hash': hash_password(new_pw),
+    }).eq('id', current_user.id).execute()
+
+    log_audit('change_password', user_id=current_user.id)
+    flash('비밀번호가 변경되었습니다.', 'success')
+    return redirect(url_for('main.dashboard'))
 
 
 # ─── 초대 수락 ───

@@ -257,13 +257,13 @@ def create_app():
             })()
         return dict(current_biz=biz)
 
-    # ─── MarketplaceManager (g.marketplace) ───
+    # ─── MarketplaceManager 클래스 사전 임포트 (before_request에서 빠르게 사용) ───
     try:
         from services.marketplace import MarketplaceManager
-        app._marketplace_default = MarketplaceManager()   # API 키 없으면 빈 매니저
+        app._MarketplaceManager = MarketplaceManager
     except Exception as e:
-        logging.warning(f'MarketplaceManager init failed: {e}')
-        app._marketplace_default = None
+        logging.warning(f'MarketplaceManager import failed: {e}')
+        app._MarketplaceManager = None
 
     # ─── 마켓플레이스 자동 수집 스케줄러 ───
     try:
@@ -278,8 +278,7 @@ def create_app():
         g.biz_id = None
         g.biz_name = None
         g.is_impersonating = False
-        # g.marketplace — 레거시 blueprints 호환 (빈 매니저)
-        g.marketplace = getattr(app, '_marketplace_default', None) or _NullMarketplace()
+        g.marketplace = _NullMarketplace()  # 기본값; biz_id 확정 후 교체
         if not current_user.is_authenticated:
             return
         # impersonation 우선
@@ -304,10 +303,15 @@ def create_app():
                 except Exception:
                     g.biz_name = str(g.biz_id)
 
-        # Supabase RLS 컨텍스트 (anon 클라이언트용, Phase 1+ 활성화)
-        # from db.client import get_supabase_client, set_tenant_context
-        # if g.biz_id:
-        #     set_tenant_context(get_supabase_client(), g.biz_id)
+            # MarketplaceManager: biz_id별 채널만 로드 (멀티테넌트 격리)
+            _Mgr = getattr(app, '_MarketplaceManager', None)
+            if _Mgr:
+                try:
+                    from db_utils import get_db
+                    g.marketplace = _Mgr(db=get_db(), biz_id=g.biz_id)
+                except Exception as _me:
+                    logging.warning(f'MarketplaceManager per-request init failed: {_me}')
+                    g.marketplace = _NullMarketplace()
 
     # ─── 전역 에러 핸들러 (프로덕션: 예외 상세 미노출) ───
     _is_production = os.environ.get('APP_ENV', 'development') == 'production'

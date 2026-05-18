@@ -46,7 +46,7 @@ def run_order_sync(app) -> dict:
     try:
         with app.app_context():
             db = get_db()
-            mgr = MarketplaceManager()
+            mgr = MarketplaceManager(db=db)  # 전체 테넌트 채널 로드 (biz_id 필터 없음)
             channels = [ch['channel'] for ch in mgr.get_all_channels()
                         if ch.get('is_active', True)]
             if not channels:
@@ -79,7 +79,7 @@ def run_settlement_sync(app) -> dict:
     try:
         with app.app_context():
             db = get_db()
-            mgr = MarketplaceManager()
+            mgr = MarketplaceManager(db=db)  # 전체 테넌트 채널 로드
             channels = [ch['channel'] for ch in mgr.get_all_channels()
                         if ch.get('is_active', True)]
             if not channels:

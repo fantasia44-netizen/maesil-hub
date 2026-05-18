@@ -55,16 +55,21 @@ instance/
 .pytest_cache/
 htmlcov/
 
-# Temp / diagnostics
-_test_*.py
-_diag_*.py
-_harness_*.py
-_check_*.py
-_debug_*.py
-_fix_*.py
-_smoke_*.py
-_verify_*.py
+# Temp / diagnostics (언더스코어 시작 스크립트 전체)
+_*.py
+_*.txt
+_*.sql
 *.tmp
+*.pkl
+*.Zip
+
+# Claude Code 내부 파일
+.claude/scheduled_tasks.lock
+.claude/plans/
+
+# 임시 스크립트 (숫자/날짜 prefix)
+check\ DB*.py
+check_db_v*/
 
 # Output / data files
 output/

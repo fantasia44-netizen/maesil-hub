@@ -10,3 +10,5 @@
 - 003_rls_policies.sql — development — 2026-05-14 16:18
 - 007_invitations.sql — development — 2026-05-18 11:42
 - 008_marketplace_tables.sql — development — 2026-05-18 11:52
+- 009_hub_rpc_functions.sql — development — 2026-05-18 14:11
+- 010_upsert_order_batch_rpc.sql — development — 2026-05-18 14:14

@@ -1,5 +1,6 @@
 """Auth views — 회원가입/로그인/로그아웃/회사선택."""
 import bcrypt
+from datetime import datetime, timezone, timedelta
 from flask import (
     Blueprint, render_template, request, redirect, url_for,
     flash, session, jsonify, g, current_app,
@@ -10,6 +11,10 @@ from db.client import get_admin_client
 from .models import HubUser
 from .helpers import log_audit
 from .decorators import login_required as hub_login_required
+
+# 로그인 잠금 정책 (doc/AUTH_AND_TENANCY.md §1-5)
+_MAX_FAILED_LOGINS = 5
+_LOCKOUT_MINUTES = 5
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
@@ -136,12 +141,41 @@ def login():
     res = client.table('app_users').select('*') \
         .eq('email', email).eq('is_deleted', False).execute()
 
-    if not res.data or not verify_password(password, res.data[0]['password_hash']):
+    # 1) 사용자 존재 여부 + 잠금 확인 (타이밍 공격 완화를 위해 비밀번호 검증 전에 체크)
+    user_row = res.data[0] if res.data else None
+    now_utc = datetime.now(timezone.utc)
+
+    if user_row:
+        locked_until = user_row.get('locked_until')
+        if locked_until:
+            # ISO 문자열 또는 datetime 객체 양쪽 지원
+            try:
+                lock_dt = locked_until if isinstance(locked_until, datetime) \
+                    else datetime.fromisoformat(str(locked_until).replace('Z', '+00:00'))
+                if lock_dt > now_utc:
+                    remain_sec = int((lock_dt - now_utc).total_seconds())
+                    log_audit('login_locked', detail={'email': email, 'remain_sec': remain_sec})
+                    flash(f'{_MAX_FAILED_LOGINS}회 실패로 잠금 중 (남은 {remain_sec}초)', 'danger')
+                    return redirect(url_for('auth.login'))
+            except Exception:
+                pass  # 잠금 시각 파싱 실패 시 일반 흐름 진행
+
+    # 2) 비밀번호 검증
+    if not user_row or not verify_password(password, user_row['password_hash']):
+        # 실패 횟수 증가 + 5회 도달 시 잠금
+        if user_row:
+            fail_count = (user_row.get('failed_login_count') or 0) + 1
+            update_payload = {'failed_login_count': fail_count}
+            if fail_count >= _MAX_FAILED_LOGINS:
+                update_payload['locked_until'] = (now_utc + timedelta(minutes=_LOCKOUT_MINUTES)).isoformat()
+                log_audit('login_lockout', user_id=user_row['id'],
+                          detail={'email': email, 'fail_count': fail_count})
+            client.table('app_users').update(update_payload).eq('id', user_row['id']).execute()
         log_audit('login_failed', detail={'email': email})
         flash('이메일 또는 비밀번호 오류', 'danger')
         return redirect(url_for('auth.login'))
 
-    user_row = res.data[0]
+    # 3) 로그인 성공
     user = HubUser(user_row)
     login_user(user)
 
@@ -151,10 +185,11 @@ def login():
     if ubm.data:
         session['current_biz_id'] = ubm.data[0]['biz_id']
 
-    # last_login 업데이트
-    from datetime import datetime, timezone
+    # 4) 실패 카운터 리셋 + last_login 업데이트
     client.table('app_users').update({
-        'last_login_at': datetime.now(timezone.utc).isoformat(),
+        'last_login_at': now_utc.isoformat(),
+        'failed_login_count': 0,
+        'locked_until': None,
     }).eq('id', user.id).execute()
 
     log_audit('login', user_id=user.id, biz_id=session.get('current_biz_id'))
@@ -366,44 +401,3 @@ def join_invite(token: str):
                   user_id=user_id, biz_id=biz_id)
         biz_name = client.table('businesses').select('name') \
             .eq('id', biz_id).single().execute().data.get('name', str(biz_id))
-        flash(f'🎉 {biz_name} 팀에 합류했습니다! (역할: {_ROLE_LABELS.get(role, role)})', 'success')
-        session['current_biz_id'] = biz_id
-        return redirect(url_for('main.dashboard'))
-
-    flash('알 수 없는 요청입니다.', 'danger')
-    return redirect(url_for('auth.join_invite', token=token))
-
-
-# ─── 회사 선택 ───
-@auth_bp.route('/select-business', methods=['GET', 'POST'])
-@login_required
-def select_business():
-    client = get_admin_client()
-    if request.method == 'POST':
-        biz_id = int(request.form.get('biz_id', 0))
-        # 권한 확인
-        ubm = client.table('user_business_map').select('biz_id') \
-            .eq('user_id', current_user.id).eq('biz_id', biz_id).execute()
-        if not ubm.data:
-            flash('해당 회사 권한 없음', 'danger')
-            return redirect(url_for('auth.select_business'))
-        session['current_biz_id'] = biz_id
-        log_audit('switch_business', detail={'biz_id': biz_id})
-        return redirect(url_for('main.dashboard'))
-
-    # GET: 회사 목록
-    ubm = client.table('user_business_map').select('biz_id, role, is_primary') \
-        .eq('user_id', current_user.id).execute()
-    biz_ids = [r['biz_id'] for r in (ubm.data or [])]
-    if not biz_ids:
-        # 슈퍼어드민은 회사 없어도 어드민 콘솔로
-        if current_user.is_super_admin:
-            return redirect(url_for('admin_saas.dashboard'))
-        flash('소속된 회사가 없습니다', 'warning')
-        return redirect(url_for('auth.signup'))
-
-    bizs = client.table('businesses').select('id, name, industry, status') \
-        .in_('id', biz_ids).execute()
-    return render_template('auth/select_business.html',
-                           businesses=bizs.data or [],
-                           ubm={r['biz_id']: r for r in (ubm.data or [])})

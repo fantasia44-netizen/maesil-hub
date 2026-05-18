@@ -820,7 +820,7 @@ class SupabaseDB(DBBase):
                 def ot_builder(table, _cf=chunk_from, _ct=chunk_to):
                     q = self.client.table(table).select(
                         "order_date,channel,product_name,qty,unit_price,"
-                        "total_amount,settlement,commission,discount_amount,shipping_fee"
+                        "total_amount,settlement,commission,discount_amount"
                     ).eq("status", "정상")
                     q = self._with_biz(q, biz_id).order("id")
                     q = q.gte("order_date", _cf).lte("order_date", _ct)

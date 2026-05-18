@@ -8,6 +8,7 @@
     <div class="list-group">
       {% for biz in businesses %}
         <form method="POST" class="d-flex">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="biz_id" value="{{ biz.id }}">
           <button type="submit" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center">
             <div>

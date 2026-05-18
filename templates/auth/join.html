@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}팀 초대 수락 — 매실 허브{% endblock %}
+{% block content %}
+<div class="row justify-content-center mt-4">
+  <div class="col-md-5">
+
+    {# 초대 정보 카드 #}
+    <div class="card border-success mb-4">
+      <div class="card-body text-center py-4">
+        <div style="font-size:40px">🍑</div>
+        <h5 class="mt-2 mb-1">팀 초대</h5>
+        <p class="text-muted mb-1">
+          <strong>{{ biz_name }}</strong> 팀에 초대받으셨습니다.
+        </p>
+        <span class="badge bg-success px-3 py-2" style="font-size:13px;">
+          역할: {{ role_label }}
+        </span>
+      </div>
+    </div>
+
+    {# 플래시 #}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for cat, msg in messages %}
+      <div class="alert alert-{{ 'danger' if cat == 'danger' else ('warning' if cat == 'warning' else 'success') }} alert-dismissible fade show">
+        {{ msg }}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+      {% endfor %}
+    {% endwith %}
+
+    {# 탭: 기존 계정 로그인 / 신규 가입 #}
+    <div class="card">
+      <div class="card-body">
+        <ul class="nav nav-tabs mb-3" id="joinTab">
+          <li class="nav-item">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#loginTab">
+              기존 계정으로 합류
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#signupTab">
+              신규 가입 후 합류
+            </button>
+          </li>
+        </ul>
+
+        <div class="tab-content">
+          {# 로그인 탭 #}
+          <div class="tab-pane fade show active" id="loginTab">
+            <form method="POST" action="{{ url_for('auth.join_invite', token=token) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="mode" value="login">
+              <div class="mb-3">
+                <label class="form-label">이메일</label>
+                <input type="email" name="email" class="form-control"
+                       value="{{ invite.email }}" required autofocus>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">비밀번호</label>
+                <input type="password" name="password" class="form-control" required>
+              </div>
+              <button type="submit" class="btn btn-success w-100">로그인 후 팀 합류</button>
+            </form>
+          </div>
+
+          {# 신규 가입 탭 #}
+          <div class="tab-pane fade" id="signupTab">
+            <form method="POST" action="{{ url_for('auth.join_invite', token=token) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="mode" value="signup">
+              <div class="mb-3">
+                <label class="form-label">이메일</label>
+                <input type="email" name="email" class="form-control"
+                       value="{{ invite.email }}" readonly>
+                <div class="form-text text-muted">초대받은 이메일로만 가입 가능합니다.</div>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">이름</label>
+                <input type="text" name="name" class="form-control" placeholder="홍길동">
+              </div>
+              <div class="mb-3">
+                <label class="form-label">비밀번호 (최소 10자)</label>
+                <input type="password" name="password" class="form-control" minlength="10" required>
+              </div>
+              <button type="submit" class="btn btn-primary w-100">가입 후 팀 합류</button>
+            </form>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="text-center mt-3">
+      <small class="text-muted">이 초대 링크는 7일간 유효합니다.</small>
+    </div>
+  </div>
+</div>
+{% endblock %}

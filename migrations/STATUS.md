@@ -8,3 +8,4 @@
 - 005_billing_admin.sql — development — 2026-05-14 16:17
 - 006_product_normalization.sql — development — 2026-05-14 16:17
 - 003_rls_policies.sql — development — 2026-05-14 16:18
+- 007_invitations.sql — development — 2026-05-18 11:42

@@ -13,6 +13,12 @@ from .decorators import login_required as hub_login_required
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
+# 역할 레이블 (team.py와 동기화)
+_ROLE_LABELS = {
+    'owner': '오너', 'admin': '관리자', 'manager': '매니저',
+    'logistics': '물류팀', 'sales': '영업팀', 'viewer': '뷰어',
+}
+
 
 # ─── 비밀번호 해싱 ───
 def hash_password(plain: str) -> str:
@@ -164,6 +170,174 @@ def logout():
     logout_user()
     session.clear()
     return redirect(url_for('main.index'))
+
+
+# ─── 초대 수락 ───
+@auth_bp.route('/join/<token>', methods=['GET', 'POST'])
+def join_invite(token: str):
+    """이메일 초대 링크 수락.
+
+    GET:
+        - 로그인 상태 → 즉시 처리 후 대시보드로
+        - 비로그인 → join 폼 표시 (기존 계정 로그인 / 신규 가입)
+    POST:
+        - mode=login: 기존 계정으로 로그인 후 합류
+        - mode=signup: 신규 계정 생성 후 합류
+    """
+    client = get_admin_client()
+    from datetime import datetime, timezone
+
+    # 토큰 조회 + 유효성 검증
+    def _get_invite():
+        try:
+            res = client.table('invitations').select('*') \
+                .eq('token', token).limit(1).execute()
+            if not res.data:
+                return None, '유효하지 않은 초대 링크입니다.'
+            inv = res.data[0]
+            if inv.get('used_at'):
+                return None, '이미 사용된 초대 링크입니다.'
+            exp = inv.get('expires_at', '')
+            if exp:
+                from datetime import datetime, timezone
+                try:
+                    exp_dt = datetime.fromisoformat(exp.replace('Z', '+00:00'))
+                    if datetime.now(timezone.utc) > exp_dt:
+                        return None, '초대 링크가 만료되었습니다. (7일 유효)'
+                except Exception:
+                    pass
+            return inv, None
+        except Exception as e:
+            return None, f'초대 조회 오류: {e}'
+
+    def _apply_invite(inv, user_id):
+        """user_business_map에 등록하고 초대를 소진 처리."""
+        biz_id = inv['biz_id']
+        role   = inv.get('role', 'viewer')
+
+        # 이미 멤버인지 확인
+        existing = client.table('user_business_map').select('id') \
+            .eq('biz_id', biz_id).eq('user_id', user_id).limit(1).execute().data
+        if not existing:
+            client.table('user_business_map').insert({
+                'user_id':    user_id,
+                'biz_id':     biz_id,
+                'role':       role,
+                'is_primary': False,
+            }).execute()
+        # 소진
+        client.table('invitations').update({
+            'used_at': datetime.now(timezone.utc).isoformat(),
+        }).eq('id', inv['id']).execute()
+
+        # 세션에 biz 세팅 (기존 primary가 없으면)
+        if not session.get('current_biz_id'):
+            session['current_biz_id'] = biz_id
+        return biz_id, role
+
+    # ─── 로그인 상태에서 GET ───
+    if current_user.is_authenticated and request.method == 'GET':
+        inv, err = _get_invite()
+        if err:
+            flash(err, 'danger')
+            return redirect(url_for('main.dashboard'))
+        try:
+            biz_id, role = _apply_invite(inv, current_user.id)
+            biz_name = client.table('businesses').select('name') \
+                .eq('id', biz_id).single().execute().data.get('name', str(biz_id))
+            log_audit('team_join', detail={'token': token[:8] + '...', 'biz_id': biz_id, 'role': role})
+            flash(f'🎉 {biz_name} 팀에 합류했습니다! (역할: {_ROLE_LABELS.get(role, role)})', 'success')
+            session['current_biz_id'] = biz_id
+        except Exception as e:
+            flash(f'합류 처리 중 오류: {e}', 'danger')
+        return redirect(url_for('main.dashboard'))
+
+    # ─── GET (비로그인) ───
+    if request.method == 'GET':
+        inv, err = _get_invite()
+        if err:
+            flash(err, 'danger')
+            return redirect(url_for('auth.login'))
+        # 업체명 + 역할 표시용
+        biz_row = client.table('businesses').select('name') \
+            .eq('id', inv['biz_id']).single().execute().data or {}
+        return render_template('auth/join.html',
+                               token=token,
+                               invite=inv,
+                               biz_name=biz_row.get('name', ''),
+                               role_label=_ROLE_LABELS.get(inv.get('role', ''), inv.get('role', '')))
+
+    # ─── POST ───
+    inv, err = _get_invite()
+    if err:
+        flash(err, 'danger')
+        return redirect(url_for('auth.login'))
+
+    mode = request.form.get('mode', 'login')
+
+    if mode == 'login':
+        # 기존 계정으로 합류
+        email    = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
+        res = client.table('app_users').select('*') \
+            .eq('email', email).eq('is_deleted', False).execute()
+        if not res.data or not verify_password(password, res.data[0]['password_hash']):
+            flash('이메일 또는 비밀번호 오류', 'danger')
+            return redirect(url_for('auth.join_invite', token=token))
+        user = HubUser(res.data[0])
+        login_user(user)
+        biz_id, role = _apply_invite(inv, user.id)
+        log_audit('team_join', detail={'mode': 'login', 'biz_id': biz_id, 'role': role},
+                  user_id=user.id, biz_id=biz_id)
+        biz_name = client.table('businesses').select('name') \
+            .eq('id', biz_id).single().execute().data.get('name', str(biz_id))
+        flash(f'🎉 {biz_name} 팀에 합류했습니다! (역할: {_ROLE_LABELS.get(role, role)})', 'success')
+        session['current_biz_id'] = biz_id
+        return redirect(url_for('main.dashboard'))
+
+    elif mode == 'signup':
+        # 신규 계정 생성 후 합류
+        email    = request.form.get('email', '').strip().lower()
+        password = request.form.get('password', '')
+        name     = request.form.get('name', '').strip()
+
+        # 초대 이메일과 불일치 방지
+        if email != inv['email']:
+            flash(f'초대받은 이메일({inv["email"]})로 가입해야 합니다.', 'danger')
+            return redirect(url_for('auth.join_invite', token=token))
+        if len(password) < 10:
+            flash('비밀번호는 최소 10자', 'danger')
+            return redirect(url_for('auth.join_invite', token=token))
+
+        # 중복 이메일 확인
+        dup = client.table('app_users').select('id') \
+            .eq('email', email).eq('is_deleted', False).execute()
+        if dup.data:
+            flash('이미 가입된 이메일입니다. 로그인으로 합류하세요.', 'warning')
+            return redirect(url_for('auth.join_invite', token=token))
+
+        # 계정 생성
+        user_res = client.table('app_users').insert({
+            'email':         email,
+            'password_hash': hash_password(password),
+            'name':          name or email.split('@')[0],
+            'email_verified': True,
+        }).execute()
+        user_id = user_res.data[0]['id']
+        user = HubUser(client.table('app_users').select('*').eq('id', user_id).single().execute().data)
+        login_user(user)
+
+        biz_id, role = _apply_invite(inv, user_id)
+        log_audit('team_join', detail={'mode': 'signup', 'biz_id': biz_id, 'role': role},
+                  user_id=user_id, biz_id=biz_id)
+        biz_name = client.table('businesses').select('name') \
+            .eq('id', biz_id).single().execute().data.get('name', str(biz_id))
+        flash(f'🎉 {biz_name} 팀에 합류했습니다! (역할: {_ROLE_LABELS.get(role, role)})', 'success')
+        session['current_biz_id'] = biz_id
+        return redirect(url_for('main.dashboard'))
+
+    flash('알 수 없는 요청입니다.', 'danger')
+    return redirect(url_for('auth.join_invite', token=token))
 
 
 # ─── 회사 선택 ───

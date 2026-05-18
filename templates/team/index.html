@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}팀 멤버 관리 — 매실 허브{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+  <div class="d-flex align-items-center justify-content-between mb-4">
+    <h4 class="mb-0">👥 팀 멤버 관리</h4>
+    {% if can_manage %}
+    <button class="btn btn-success btn-sm" data-bs-toggle="modal" data-bs-target="#inviteModal">
+      + 멤버 초대
+    </button>
+    {% endif %}
+  </div>
+
+  {# 플래시 메시지 #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+    <div class="alert alert-{{ 'danger' if cat == 'danger' else ('warning' if cat == 'warning' else 'success') }} alert-dismissible fade show">
+      {{ msg }}
+      <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+  {% endwith %}
+
+  {# 현재 멤버 목록 #}
+  <div class="card mb-4">
+    <div class="card-header fw-semibold">현재 멤버 ({{ members|length }}명)</div>
+    <div class="card-body p-0">
+      <table class="table table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>이름 / 이메일</th>
+            <th>역할</th>
+            <th>마지막 로그인</th>
+            {% if can_manage %}<th class="text-end">관리</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in members %}
+          <tr>
+            <td>
+              <div class="fw-semibold">{{ m.name }}{% if m.is_me %} <span class="badge bg-secondary ms-1">나</span>{% endif %}</div>
+              <small class="text-muted">{{ m.email }}</small>
+            </td>
+            <td>
+              {% if m.role == 'owner' %}
+                <span class="badge bg-warning text-dark">{{ m.role_label }}</span>
+              {% elif m.role == 'admin' %}
+                <span class="badge bg-primary">{{ m.role_label }}</span>
+              {% elif m.role == 'manager' %}
+                <span class="badge bg-info text-dark">{{ m.role_label }}</span>
+              {% else %}
+                <span class="badge bg-secondary">{{ m.role_label }}</span>
+              {% endif %}
+            </td>
+            <td class="text-muted small">
+              {{ m.last_login | kst_date if m.last_login else '없음' }}
+            </td>
+            {% if can_manage %}
+            <td class="text-end">
+              {% if m.role != 'owner' and not m.is_me %}
+              <div class="btn-group btn-group-sm">
+                <button class="btn btn-outline-secondary"
+                        onclick="openRoleModal({{ m.user_id }}, '{{ m.role }}', '{{ m.name }}')">
+                  역할 변경
+                </button>
+                <button class="btn btn-outline-danger"
+                        onclick="confirmRemove({{ m.user_id }}, '{{ m.name }}')">
+                  제거
+                </button>
+              </div>
+              {% endif %}
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# 대기중 초대 #}
+  {% if pending_invites %}
+  <div class="card">
+    <div class="card-header fw-semibold">초대 대기중 ({{ pending_invites|length }}건)</div>
+    <div class="card-body p-0">
+      <table class="table table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>이메일</th>
+            <th>역할</th>
+            <th>만료일</th>
+            {% if can_manage %}<th class="text-end">취소</th>{% endif %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for inv in pending_invites %}
+          <tr>
+            <td>{{ inv.email }}</td>
+            <td><span class="badge bg-secondary">{{ inv.role_label }}</span></td>
+            <td class="text-muted small">{{ inv.expires_at[:10] if inv.expires_at else '-' }}</td>
+            {% if can_manage %}
+            <td class="text-end">
+              <form method="POST"
+                    action="{{ url_for('team.cancel_invite', invite_id=inv.id) }}"
+                    onsubmit="return confirm('초대를 취소할까요?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-danger">취소</button>
+              </form>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{# ─── 초대 모달 ─── #}
+{% if can_manage %}
+<div class="modal fade" id="inviteModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">팀원 초대</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" action="{{ url_for('team.invite') }}" id="inviteForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">이메일 *</label>
+            <input type="email" name="email" class="form-control" placeholder="직원 이메일" required autofocus>
+            <div class="form-text">입력한 이메일로 초대 링크가 발송됩니다 (7일 유효).</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">역할</label>
+            <select name="role" class="form-select">
+              {% for r in invite_roles %}
+              <option value="{{ r }}">{{ role_labels.get(r, r) }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+          <button type="submit" class="btn btn-success">초대 발송</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# ─── 역할 변경 모달 ─── #}
+<div class="modal fade" id="roleModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title">역할 변경</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="POST" id="roleForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-body">
+          <p class="mb-2 text-muted small" id="roleModalTarget"></p>
+          <select name="role" id="roleSelect" class="form-select">
+            {% for r in invite_roles %}
+            <option value="{{ r }}">{{ role_labels.get(r, r) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
+          <button type="submit" class="btn btn-primary btn-sm">변경</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+{# ─── 제거 폼 (숨김) ─── #}
+<form method="POST" id="removeForm" style="display:none">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+</form>
+{% endif %}
+
+{% block scripts %}
+<script>
+function openRoleModal(uid, currentRole, name) {
+  document.getElementById('roleModalTarget').textContent = name + '님의 역할';
+  document.getElementById('roleSelect').value = currentRole;
+  document.getElementById('roleForm').action = '/settings/team/members/' + uid + '/role';
+  new bootstrap.Modal(document.getElementById('roleModal')).show();
+}
+function confirmRemove(uid, name) {
+  if (!confirm(name + '님을 팀에서 제거할까요?')) return;
+  const form = document.getElementById('removeForm');
+  form.action = '/settings/team/members/' + uid + '/remove';
+  form.submit();
+}
+</script>
+{% endblock %}
+{% endblock %}

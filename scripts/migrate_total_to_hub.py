@@ -96,7 +96,8 @@ SILENT_DROP_COLS = {
     'stock_ledger':      {'deleted_at', 'ref_event_uid', 'replaced_by', 'replaces',
                           'result_lot', 'source_lot', 'updated_by', 'worker_id', 'updated_at'},
     'order_transactions': {'order_datetime', 'processed_at', 'revenue_category',
-                           'shipping_fee', 'status_changed_at'},
+                           'shipping_fee', 'status_changed_at',
+                           'import_run_id'},  # hub ID 불일치 → FK 위반 방지, NULL 허용
     'purchase_orders':   {'caution_text', 'delivery_note', 'invoice_manager', 'item_count',
                           'manager_contact', 'my_biz_name', 'order_manager', 'partner_id',
                           'registered_by', 'request_date'},
@@ -136,14 +137,31 @@ def fetch_all(client, table):
     return all_rows
 
 
+# 테이블별 UPSERT conflict 컬럼 (UNIQUE 제약 기반)
+# 이 컬럼이 있으면 INSERT 대신 UPSERT(DO NOTHING) 사용
+TABLE_CONFLICT_COLS = {
+    'order_transactions': 'biz_id,channel,order_no,line_no',
+    'order_shipping':     'biz_id,order_no',
+    'import_runs':        None,   # id-based only (id 드롭하므로 insert 사용)
+    'stock_ledger':       None,
+}
+
+
 def insert_chunked(client, table, rows, chunk_size=500):
-    """destination 테이블에 chunk 단위 INSERT."""
+    """destination 테이블에 chunk 단위 INSERT (또는 UPSERT)."""
+    conflict_col = TABLE_CONFLICT_COLS.get(table, None)
     inserted = 0
     failed = 0
     for i in range(0, len(rows), chunk_size):
         chunk = rows[i:i + chunk_size]
         try:
-            client.table(table).insert(chunk).execute()
+            if conflict_col:
+                # UNIQUE 위반 → DO NOTHING (중복은 소스 데이터 품질 문제로 스킵)
+                client.table(table).upsert(
+                    chunk, on_conflict=conflict_col, ignore_duplicates=True
+                ).execute()
+            else:
+                client.table(table).insert(chunk).execute()
             inserted += len(chunk)
         except Exception as e:
             err = str(e)[:100]
@@ -151,7 +169,12 @@ def insert_chunked(client, table, rows, chunk_size=500):
             # 행별 재시도
             for r in chunk:
                 try:
-                    client.table(table).insert(r).execute()
+                    if conflict_col:
+                        client.table(table).upsert(
+                            r, on_conflict=conflict_col, ignore_duplicates=True
+                        ).execute()
+                    else:
+                        client.table(table).insert(r).execute()
                     inserted += 1
                 except Exception:
                     failed += 1
@@ -231,7 +254,14 @@ def migrate_table(src, dst, table, dry_run=False):
                  'current_period_start', 'current_period_end',
                  'expected_date', 'received_date'}
 
-    # 변환: id 제거 + biz_id 주입 + dst에 없는 컬럼 제거 + 빈 문자열 date → None
+    # integer 컬럼 식별 (float으로 저장된 값 → int 변환)
+    INT_COLS = {'qty', 'unit_price', 'total_amount', 'discount_amount',
+                'settlement', 'commission', 'line_no', 'line_code', 'sort_order',
+                'amount', 'quantity', 'price', 'cost', 'tax', 'fee',
+                'inserted_count', 'updated_count', 'failed_count',
+                'total_rows', 'page_size', 'total_count'}
+
+    # 변환: id 제거 + biz_id 주입 + dst에 없는 컬럼 제거 + 빈 문자열 date → None + float→int
     remap = COLUMN_REMAP.get(table, {})
     silent_drop = SILENT_DROP_COLS.get(table, set())
     transformed = []
@@ -252,6 +282,9 @@ def migrate_table(src, dst, table, dry_run=False):
             # 빈 문자열을 date/timestamp 컬럼에 넣으면 PostgreSQL fail
             if mapped_k in DATE_COLS and (v == '' or v is None):
                 new[mapped_k] = None
+            # float → int (PostgreSQL INTEGER 타입은 float 거부)
+            elif mapped_k in INT_COLS and isinstance(v, float):
+                new[mapped_k] = int(round(v))
             else:
                 new[mapped_k] = v
         new['biz_id'] = TARGET_BIZ_ID

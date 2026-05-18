@@ -65,7 +65,7 @@ def index():
                            date_to=date_to,
                            today=today,
                            cutoff_time=cutoff_time,
-                           user_role=current_user.role)
+                           user_role=getattr(current_user, 'role', None))
 
 
 # ================================================================

@@ -68,7 +68,7 @@ def packing_required(f):
     @login_required
     def wrapped(*args, **kwargs):
         # packing 역할 + 관리자/책임자는 패킹센터 접근 가능
-        if current_user.role not in _ALL_PACKING_ROLES:
+        if getattr(current_user, 'role', None) not in _ALL_PACKING_ROLES:
             flash('패킹센터 접근 권한이 없습니다.', 'danger')
             return redirect(url_for('main.dashboard'))
         return f(*args, **kwargs)

@@ -157,12 +157,12 @@
                 <div class="col-auto">
                     <label class="form-label">시작일</label>
                     <input type="date" name="date_from" class="form-control form-control-sm"
-                           value="{{ days_ago_kst(7) if days_ago_kst is defined }}">
+                           value="{{ default_date_from|default('') }}">
                 </div>
                 <div class="col-auto">
                     <label class="form-label">종료일</label>
                     <input type="date" name="date_to" class="form-control form-control-sm"
-                           value="{{ today_kst() if today_kst is defined }}">
+                           value="{{ default_date_to|default('') }}">
                 </div>
                 <div class="col-auto">
                     <button type="button" class="btn btn-success btn-sm" onclick="runSync()" id="btnSync">

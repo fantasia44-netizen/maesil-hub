@@ -94,11 +94,17 @@ def index():
         if log.get('started_at'):
             log['started_at_kst'] = _utc_to_kst_str(log['started_at'])
 
+    # 수동 동기화 기본 날짜
+    default_date_from = days_ago_kst(7)
+    default_date_to = today_kst()
+
     return render_template('marketplace/index.html',
                            channels=channels,
                            configs=configs,
                            recent_logs=recent_logs,
-                           channel_labels=channel_labels)
+                           channel_labels=channel_labels,
+                           default_date_from=default_date_from,
+                           default_date_to=default_date_to)
 
 
 @marketplace_bp.route('/config/<channel>', methods=['POST'])

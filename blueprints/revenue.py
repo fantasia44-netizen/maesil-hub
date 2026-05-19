@@ -12,7 +12,7 @@ from services.tz_utils import today_kst
 import pandas as pd
 from flask import (
     Blueprint, render_template, request, current_app,
-    flash, redirect, url_for, send_file, jsonify,
+    flash, redirect, url_for, send_file, jsonify, g,
 )
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
@@ -55,6 +55,7 @@ def index():
             'p_date_from': date_from,
             'p_date_to': date_to,
             'p_category': category if category != '전체' else None,
+            'p_biz_id': g.biz_id,
         }).execute()
         _sum = res.data
         if isinstance(_sum, list):

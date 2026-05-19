@@ -122,6 +122,7 @@ class OrdersRepo(BaseRepo):
                     rpc_res = self.client.rpc('rpc_check_order_no_exists', {
                         'p_channel': ch,
                         'p_order_nos': list(order_nos),
+                        'p_biz_id': self._resolve_biz_id(None),
                     }).execute()
                     for rec in (rpc_res.data or []):
                         key = (rec.get('channel', ''), rec.get('order_no', ''), rec.get('line_no', 1))
@@ -152,7 +153,8 @@ class OrdersRepo(BaseRepo):
                 # ★ RPC 우선 (1000행 limit 회피)
                 try:
                     rpc_res = self.client.rpc('rpc_check_raw_hash_exists',
-                                              {'p_hashes': batch_hashes}).execute()
+                                              {'p_hashes': batch_hashes,
+                                               'p_biz_id': self._resolve_biz_id(None)}).execute()
                     for xr in (rpc_res.data or []):
                         cross_channel_hashes[xr["raw_hash"]] = xr.get("channel", "")
                 except Exception:

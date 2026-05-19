@@ -122,7 +122,8 @@ class InventoryRepo(BaseRepo):
                 # RPC 우선 — Python fallback (RPC 미배포 환경 호환)
                 try:
                     res = self.client.rpc('rpc_check_event_uid_exists',
-                                          {'p_uids': uid_list}).execute()
+                                          {'p_uids': uid_list,
+                                           'p_biz_id': self._resolve_biz_id(None)}).execute()
                     existing_uids = {r['event_uid'] for r in (res.data or [])}
                 except Exception:
                     # Fallback: chunk 단위 IN 조회 (1000행 limit 회피)

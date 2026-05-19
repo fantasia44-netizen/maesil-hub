@@ -264,10 +264,18 @@ def query_stock_snapshot(db, date_str, location=None, category=None,
         split_mode = 'lot_number'
 
     try:
-        res = db.client.rpc('get_stock_snapshot_agg', {
+        rpc_params = {
             'p_date_to': date_str,
             'p_split_mode': split_mode,
-        }).execute()
+        }
+        # biz_id 필터: Flask g.biz_id 또는 db._biz_id
+        try:
+            from flask import g, has_request_context
+            if has_request_context() and getattr(g, 'biz_id', None):
+                rpc_params['p_biz_id'] = g.biz_id
+        except Exception:
+            pass
+        res = db.client.rpc('get_stock_snapshot_agg', rpc_params).execute()
         snapshot_rows = res.data or []
         if snapshot_rows:
             all_data = snapshot_rows

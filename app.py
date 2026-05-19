@@ -185,6 +185,7 @@ def create_app():
                 'p_date_from': month_start,
                 'p_date_to': today,
                 'p_category': None,
+                'p_biz_id': biz_id,
             }).execute()
             _s = r.data[0] if (r.data and isinstance(r.data, list)) else (r.data or {})
             month_revenue = int(_s.get('total_settlement', 0) or 0)

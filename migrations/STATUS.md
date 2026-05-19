@@ -13,3 +13,4 @@
 - 009_hub_rpc_functions.sql — development — 2026-05-18 14:11
 - 010_upsert_order_batch_rpc.sql — development — 2026-05-18 14:14
 - 011_stock_snapshot_rpc.sql — development — 2026-05-18 18:57
+- 012_rpc_biz_id_isolation.sql — development — 2026-05-19 11:09

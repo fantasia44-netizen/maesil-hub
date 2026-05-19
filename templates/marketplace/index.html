@@ -213,9 +213,9 @@
                                 <span class="badge bg-secondary">{{ log.status }}</span>
                             {% endif %}
                         </td>
-                        <td>{{ log.records_fetched|default(0) }}</td>
-                        <td>{{ log.records_new|default(0) }}</td>
-                        <td>{{ log.records_updated|default(0) }}</td>
+                        <td>{{ log.fetched|default(0) }}</td>
+                        <td>{{ log.new|default(0) }}</td>
+                        <td>{{ log.updated|default(0) }}</td>
                         <td>{{ log.triggered_by|default('system') }}</td>
                     </tr>
                     {% else %}

@@ -53,14 +53,40 @@ def index():
     db = get_db()
     mgr = g.marketplace
 
-    channels = mgr.get_all_channels()
+    channel_labels = {
+        '스마트스토어_배마마': '스마트스토어 (배마마)',
+        '스마트스토어': '스마트스토어',
+        '쿠팡': '쿠팡',
+        '자사몰': '자사몰 (Cafe24)',
+        '11번가': '11번가',
+        '옥션': '옥션/G마켓',
+        '카카오': '카카오쇼핑',
+    }
 
-    # 각 채널의 DB config 로드
-    configs = {}
-    for ch in channels:
-        ch_name = ch['channel']
-        rows = db.query_marketplace_api_configs(channel=ch_name)
-        configs[ch_name] = rows[0] if rows else {}
+    # DB에서 전체 config 로드
+    all_configs = {row['channel']: row
+                   for row in db.query_marketplace_api_configs()}
+
+    # 활성 채널: MarketplaceManager에서 로드된 것
+    active_from_mgr = {ch['channel']: ch for ch in mgr.get_all_channels()}
+
+    # 표시할 채널: DB에 등록된 것 + 기본 후보 채널 (DB 없어도 항상 표시)
+    DEFAULT_CHANNELS = ['스마트스토어_배마마', '쿠팡']
+    channel_names = list({*active_from_mgr.keys(), *all_configs.keys(), *DEFAULT_CHANNELS})
+    channel_names.sort()
+
+    channels = []
+    for ch_name in channel_names:
+        cfg = all_configs.get(ch_name, {})
+        mgr_info = active_from_mgr.get(ch_name, {})
+        channels.append({
+            'channel': ch_name,
+            'is_active': cfg.get('is_active', False),
+            'is_ready': mgr_info.get('is_ready', False),
+            'last_synced_at': cfg.get('last_synced_at'),
+        })
+
+    configs = all_configs  # 템플릿에서 configs[ch.channel] 으로 접근
 
     # 최근 동기화 로그 (UTC→KST 변환)
     recent_logs = db.query_api_sync_logs(limit=10)
@@ -71,7 +97,8 @@ def index():
     return render_template('marketplace/index.html',
                            channels=channels,
                            configs=configs,
-                           recent_logs=recent_logs)
+                           recent_logs=recent_logs,
+                           channel_labels=channel_labels)
 
 
 @marketplace_bp.route('/config/<channel>', methods=['POST'])

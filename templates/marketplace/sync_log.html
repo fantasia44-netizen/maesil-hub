@@ -76,9 +76,9 @@
                             {% endif %}
                         </td>
                         <td>{{ log.date_from or '' }} ~ {{ log.date_to or '' }}</td>
-                        <td>{{ log.records_fetched|default(0) }}</td>
-                        <td>{{ log.records_new|default(0) }}</td>
-                        <td>{{ log.records_updated|default(0) }}</td>
+                        <td>{{ log.fetched|default(0) }}</td>
+                        <td>{{ log.new|default(0) }}</td>
+                        <td>{{ log.updated|default(0) }}</td>
                         <td>{{ log.triggered_by|default('system') }}</td>
                         <td class="error-detail" title="{{ log.error_message or '' }}">
                             {{ log.error_message or '' }}

@@ -136,7 +136,9 @@ class MarketplaceBaseClient(ABC):
         return self.config.get('channel') or self.CHANNEL_NAME
 
     def update_config(self, db, updates: dict):
-        """marketplace_api_config 업데이트."""
+        """marketplace_api_config 업데이트 (토큰 갱신 시 호출)."""
         updates['channel'] = self.channel_name
-        db.upsert_marketplace_api_config(updates)
+        # biz_id: 스케줄러 컨텍스트에서도 config에서 직접 추출
+        biz_id = self.config.get('biz_id')
+        db.upsert_marketplace_api_config(updates, biz_id=biz_id)
         self.config.update(updates)

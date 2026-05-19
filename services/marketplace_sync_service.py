@@ -23,6 +23,9 @@ def sync_orders(db, marketplace_mgr, channel, date_from, date_to,
         return {'fetched': 0, 'new': 0, 'updated': 0,
                 'error': f'{channel} 클라이언트 미준비'}
 
+    # client.config에서 biz_id 추출 (스케줄러: Flask request context 없음)
+    biz_id = client.config.get('biz_id')
+
     # 동기화 로그 시작
     log = db.insert_api_sync_log({
         'channel': channel,
@@ -31,7 +34,7 @@ def sync_orders(db, marketplace_mgr, channel, date_from, date_to,
         'date_from': date_from,
         'date_to': date_to,
         'triggered_by': triggered_by,
-    })
+    }, biz_id=biz_id)
     log_id = log['id'] if log else None
 
     try:
@@ -49,8 +52,8 @@ def sync_orders(db, marketplace_mgr, channel, date_from, date_to,
             _finish_log(db, log_id, 'success', fetched=0)
             return {'fetched': 0, 'new': 0, 'updated': 0, 'log_id': log_id}
 
-        # DB 저장
-        result = db.upsert_api_orders_batch(orders)
+        # DB 저장 (biz_id 명시 — 스케줄러 컨텍스트에서 g.biz_id 없음)
+        result = db.upsert_api_orders_batch(orders, biz_id=biz_id)
 
         _finish_log(db, log_id, 'success',
                     fetched=fetched,
@@ -61,7 +64,7 @@ def sync_orders(db, marketplace_mgr, channel, date_from, date_to,
         db.upsert_marketplace_api_config({
             'channel': channel,
             'last_synced_at': datetime.now(timezone.utc).isoformat(),
-        })
+        }, biz_id=biz_id)
 
         logger.info(f'[동기화] {channel} 주문 {fetched}건 (신규 {result.get("new", 0)})')
         return {
@@ -90,6 +93,9 @@ def sync_settlements(db, marketplace_mgr, channel, date_from, date_to,
         return {'fetched': 0, 'new': 0, 'updated': 0,
                 'error': f'{channel} 클라이언트 미준비'}
 
+    # client.config에서 biz_id 추출
+    biz_id = client.config.get('biz_id')
+
     log = db.insert_api_sync_log({
         'channel': channel,
         'sync_type': 'settlements',
@@ -97,7 +103,7 @@ def sync_settlements(db, marketplace_mgr, channel, date_from, date_to,
         'date_from': date_from,
         'date_to': date_to,
         'triggered_by': triggered_by,
-    })
+    }, biz_id=biz_id)
     log_id = log['id'] if log else None
 
     try:
@@ -113,7 +119,7 @@ def sync_settlements(db, marketplace_mgr, channel, date_from, date_to,
             _finish_log(db, log_id, 'success', fetched=0)
             return {'fetched': 0, 'new': 0, 'updated': 0, 'log_id': log_id}
 
-        db.upsert_api_settlements_batch(settlements)
+        db.upsert_api_settlements_batch(settlements, biz_id=biz_id)
 
         _finish_log(db, log_id, 'success', fetched=fetched, new=fetched)
 
@@ -148,6 +154,8 @@ def sync_revenue_fees(db, marketplace_mgr, channel, date_from, date_to,
     if not hasattr(client, 'fetch_revenue_history'):
         return {'fetched': 0, 'saved': 0, 'error': f'{channel}은 매출내역 API 미지원'}
 
+    biz_id = client.config.get('biz_id')
+
     log = db.insert_api_sync_log({
         'channel': channel,
         'sync_type': 'revenue_fees',
@@ -155,7 +163,7 @@ def sync_revenue_fees(db, marketplace_mgr, channel, date_from, date_to,
         'date_from': date_from,
         'date_to': date_to,
         'triggered_by': triggered_by,
-    })
+    }, biz_id=biz_id)
     log_id = log['id'] if log else None
 
     try:
@@ -257,7 +265,7 @@ def sync_revenue_fees(db, marketplace_mgr, channel, date_from, date_to,
                 },
             })
 
-        db.upsert_api_settlements_batch(settlements)
+        db.upsert_api_settlements_batch(settlements, biz_id=biz_id)
         saved = len(settlements)
 
         _finish_log(db, log_id, 'success', fetched=fetched, new=saved)
@@ -400,9 +408,9 @@ def _finish_log(db, log_id, status, fetched=0, new=0, updated=0,
     update = {
         'status': status,
         'finished_at': datetime.now(timezone.utc).isoformat(),
-        'records_fetched': fetched,
-        'records_new': new,
-        'records_updated': updated,
+        'fetched': fetched,   # api_sync_log 컬럼명 (records_fetched X)
+        'new': new,
+        'updated': updated,
     }
     if error_message:
         update['error_message'] = error_message[:500]

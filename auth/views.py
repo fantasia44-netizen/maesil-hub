@@ -179,11 +179,12 @@ def login():
     user = HubUser(user_row)
     login_user(user)
 
-    # primary 회사 자동 선택
-    ubm = client.table('user_business_map').select('biz_id') \
-        .eq('user_id', user.id).order('is_primary', desc=True).order('id').execute()
-    if ubm.data:
-        session['current_biz_id'] = ubm.data[0]['biz_id']
+    # primary 회사 자동 선택 (슈퍼어드민은 스킵 → 항상 /admin/ 으로)
+    if not user.is_super_admin:
+        ubm = client.table('user_business_map').select('biz_id') \
+            .eq('user_id', user.id).order('is_primary', desc=True).order('id').execute()
+        if ubm.data:
+            session['current_biz_id'] = ubm.data[0]['biz_id']
 
     # 4) 실패 카운터 리셋 + last_login 업데이트
     client.table('app_users').update({

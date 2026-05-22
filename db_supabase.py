@@ -819,32 +819,57 @@ class SupabaseDB(DBBase):
                    and category in DAILY_REVENUE_ONLY_CATEGORIES)
 
         if not skip_ot:
-            # 날짜 범위가 길면 7일씩 분할 조회 — 연결 끊김 방지
-            from datetime import datetime, timedelta as _td
-            def _iter_week_ranges(df, dt):
-                if not df or not dt:
-                    yield df, dt
-                    return
-                cur = datetime.strptime(df, '%Y-%m-%d')
-                end = datetime.strptime(dt, '%Y-%m-%d')
-                while cur <= end:
-                    chunk_end = min(cur + _td(days=6), end)
-                    yield cur.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d')
-                    cur = chunk_end + _td(days=1)
+            # ── RPC 우선: GROUP BY 단일 호출 (페이지네이션 없음) ──────────
+            ot_rows = None
+            try:
+                rpc_params = {
+                    'p_date_from': date_from or '2000-01-01',
+                    'p_date_to':   date_to   or '2099-12-31',
+                }
+                if biz_id is not None:
+                    rpc_params['p_biz_id'] = biz_id
+                if channel and channel != '전체':
+                    rpc_params['p_channel'] = channel
+                _res = self.client.rpc('get_revenue_rows_agg', rpc_params).execute()
+                _data = _res.data
+                if isinstance(_data, str):
+                    import json as _json
+                    _data = _json.loads(_data)
+                if isinstance(_data, list):
+                    ot_rows = _data
+            except Exception as _rpc_err:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    f'[query_revenue] get_revenue_rows_agg RPC 실패, 폴백 사용: {_rpc_err}'
+                )
 
-            ot_rows = []
-            for chunk_from, chunk_to in _iter_week_ranges(date_from, date_to):
-                def ot_builder(table, _cf=chunk_from, _ct=chunk_to):
-                    q = self.client.table(table).select(
-                        "order_date,channel,product_name,qty,unit_price,"
-                        "total_amount,settlement,commission,discount_amount"
-                    ).eq("status", "정상")
-                    q = self._with_biz(q, biz_id).order("id")
-                    q = q.gte("order_date", _cf).lte("order_date", _ct)
-                    if channel and channel != "전체":
-                        q = q.eq("channel", channel)
-                    return q
-                ot_rows.extend(self._paginate_query("order_transactions", ot_builder))
+            if ot_rows is None:
+                # ── 폴백: 날짜 범위가 길면 7일씩 분할 조회 ──────────────
+                from datetime import datetime, timedelta as _td
+                def _iter_week_ranges(df, dt):
+                    if not df or not dt:
+                        yield df, dt
+                        return
+                    cur = datetime.strptime(df, '%Y-%m-%d')
+                    end = datetime.strptime(dt, '%Y-%m-%d')
+                    while cur <= end:
+                        chunk_end = min(cur + _td(days=6), end)
+                        yield cur.strftime('%Y-%m-%d'), chunk_end.strftime('%Y-%m-%d')
+                        cur = chunk_end + _td(days=1)
+
+                ot_rows = []
+                for chunk_from, chunk_to in _iter_week_ranges(date_from, date_to):
+                    def ot_builder(table, _cf=chunk_from, _ct=chunk_to):
+                        q = self.client.table(table).select(
+                            "order_date,channel,product_name,qty,unit_price,"
+                            "total_amount,settlement,commission,discount_amount"
+                        ).eq("status", "정상")
+                        q = self._with_biz(q, biz_id).order("id")
+                        q = q.gte("order_date", _cf).lte("order_date", _ct)
+                        if channel and channel != "전체":
+                            q = q.eq("channel", channel)
+                        return q
+                    ot_rows.extend(self._paginate_query("order_transactions", ot_builder))
 
             for r in ot_rows:
                 pn = (r.get("product_name") or "").replace(' ', '').strip()

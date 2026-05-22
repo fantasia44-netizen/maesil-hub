@@ -19,3 +19,4 @@
 - 015_missing_rpcs.sql — development — 2026-05-22 10:58
 - 016_fix_rpc_types.sql — development — 2026-05-22 10:58
 - 017_shipment_stats_fix.sql — development — 2026-05-22 11:12
+- 018_revenue_rows_rpc.sql — development — 2026-05-22 11:18

@@ -74,15 +74,23 @@ def index():
             for r in manual:
                 r['_source'] = 'manual'
 
-            # 2) 주문처리 출고 (stock_ledger SALES_OUT) — 품목명 검색 또는 날짜 조건 시
+            # 2) 주문처리 출고 (stock_ledger SALES_OUT) — 최대 500건, 직접 쿼리
             sales_out = []
             if keyword or date_from or date_to:
                 try:
-                    raw = db.query_stock_ledger(
-                        date_to=date_to or '9999-12-31',
-                        date_from=date_from or None,
-                        type_list=['SALES_OUT'],
-                    )
+                    from flask import g
+                    biz_id = getattr(g, 'biz_id', None)
+                    q = db.client.table('stock_ledger') \
+                        .select('id,transaction_date,product_name,qty,memo,location') \
+                        .eq('type', 'SALES_OUT').eq('status', 'active') \
+                        .order('transaction_date', desc=True).limit(500)
+                    if date_from:
+                        q = q.gte('transaction_date', date_from)
+                    if date_to:
+                        q = q.lte('transaction_date', date_to)
+                    if biz_id:
+                        q = q.eq('biz_id', biz_id)
+                    raw = q.execute().data or []
                     kw_norm = (keyword or '').replace(' ', '').lower()
                     for r in raw:
                         pname = (r.get('product_name') or '')

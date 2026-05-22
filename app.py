@@ -150,57 +150,51 @@ def create_app():
         today = date.today().isoformat()
         month_start = today[:8] + '01'
 
-        # 오늘 주문
-        try:
-            r = c.table('order_transactions').select('id', count='exact') \
-                .eq('biz_id', biz_id).eq('order_date', today).limit(1).execute()
-            today_orders = r.count or 0
-        except Exception:
-            today_orders = '-'
-
-        # 미출고 (is_outbound_done=False, 상태 정상)
-        try:
-            r = c.table('order_transactions').select('id', count='exact') \
-                .eq('biz_id', biz_id).eq('is_outbound_done', False) \
-                .neq('status', '취소').limit(1).execute()
-            pending_ship = r.count or 0
-        except Exception:
-            pending_ship = '-'
-
-        # 재고 품목 수 (stock_ledger 기준 품목 종류)
-        try:
-            r = c.rpc('get_stock_summary', {'p_biz_id': biz_id}).execute()
-            stock_items = len(r.data) if r.data else 0
-        except Exception:
-            try:
-                r = c.table('stock_ledger').select('product_name') \
-                    .eq('biz_id', biz_id).limit(1000).execute()
-                stock_items = len(set(x['product_name'] for x in (r.data or [])))
-            except Exception:
-                stock_items = '-'
-
-        # 이달 매출 (RPC 우선)
-        try:
-            r = c.rpc('get_revenue_summary_agg', {
-                'p_date_from': month_start,
-                'p_date_to': today,
-                'p_category': None,
-                'p_biz_id': biz_id,
-            }).execute()
-            _s = r.data[0] if (r.data and isinstance(r.data, list)) else (r.data or {})
-            month_revenue = int(_s.get('total_settlement', 0) or 0)
-        except Exception:
-            try:
-                r = c.table('order_transactions').select('settlement') \
-                    .eq('biz_id', biz_id) \
-                    .gte('order_date', month_start).lte('order_date', today) \
-                    .neq('status', '취소').limit(5000).execute()
-                month_revenue = sum(x.get('settlement') or 0 for x in (r.data or []))
-            except Exception:
-                month_revenue = '-'
-
-        # 7일 매출 추이 (스파크라인용)
+        today_orders = pending_ship = stock_items = month_revenue = '-'
         revenue_trend = []
+
+        # ── KPI 통합 RPC (API 5회 → 2회) ──────────────────────────────
+        try:
+            kpi = c.rpc('get_dashboard_kpi', {
+                'p_biz_id': biz_id,
+                'p_today': today,
+                'p_month_start': month_start,
+            }).execute().data or {}
+            today_orders  = int(kpi.get('today_orders',  0) or 0)
+            pending_ship  = int(kpi.get('pending_ship',  0) or 0)
+            stock_items   = int(kpi.get('stock_items',   0) or 0)
+            month_revenue = int(kpi.get('month_revenue', 0) or 0)
+        except Exception:
+            # 폴백: 개별 쿼리
+            try:
+                r = c.table('order_transactions').select('id', count='exact') \
+                    .eq('biz_id', biz_id).eq('order_date', today).limit(1).execute()
+                today_orders = r.count or 0
+            except Exception:
+                pass
+            try:
+                r = c.table('order_transactions').select('id', count='exact') \
+                    .eq('biz_id', biz_id).eq('is_outbound_done', False) \
+                    .neq('status', '취소').limit(1).execute()
+                pending_ship = r.count or 0
+            except Exception:
+                pass
+            try:
+                r = c.rpc('get_stock_summary', {'p_biz_id': biz_id}).execute()
+                stock_items = len(r.data) if r.data else 0
+            except Exception:
+                pass
+            try:
+                r = c.rpc('get_revenue_summary_agg', {
+                    'p_date_from': month_start, 'p_date_to': today,
+                    'p_category': None, 'p_biz_id': biz_id,
+                }).execute()
+                _s = r.data[0] if (r.data and isinstance(r.data, list)) else (r.data or {})
+                month_revenue = int(_s.get('total_settlement', 0) or 0)
+            except Exception:
+                pass
+
+        # 7일 매출 추이
         try:
             from db_utils import get_db
             revenue_trend = get_db().query_revenue_trend(days=7, biz_id=biz_id)

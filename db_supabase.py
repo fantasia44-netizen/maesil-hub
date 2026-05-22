@@ -480,15 +480,32 @@ class SupabaseDB(DBBase):
 
     def query_filter_options(self, biz_id=None):
         """위치/카테고리 목록 반환. biz_id로 테넌트 격리 (tenant_guard 자동 주입).
-        5분 TTL 캐시로 반복 페이지네이션 스캔 방지.
+        RPC get_filter_options 우선 (DISTINCT SQL) → 폴백: 5분 TTL 캐시 + 페이지네이션.
         """
         import time as _time
-        cache_key = biz_id  # None도 키로 사용 가능
+        biz_id = self._resolve_biz_id(biz_id)
+        cache_key = biz_id
         now = _time.time()
         cached = self._filter_options_cache.get(cache_key)
         if cached and now < cached[0]:
             return cached[1], cached[2]
 
+        # RPC 우선 — 35페이지 스캔 → 1회 DISTINCT 쿼리
+        try:
+            rpc_params = {}
+            if biz_id is not None:
+                rpc_params['p_biz_id'] = biz_id
+            res = self.client.rpc('get_filter_options', rpc_params).execute()
+            all_vals = res.data or []
+            if all_vals:
+                locs = sorted(set(r['location'] for r in all_vals if r.get('location')))
+                cats = sorted(set(r['category'] for r in all_vals if r.get('category')))
+                self._filter_options_cache[cache_key] = (now + self._FILTER_OPTIONS_TTL, locs, cats)
+                return locs, cats
+        except Exception:
+            pass
+
+        # 폴백: 기존 페이지네이션
         def builder(table):
             q = self.client.table(table).select("location,category") \
                 .eq("status", "active").order("id")

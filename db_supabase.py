@@ -3020,9 +3020,10 @@ class SupabaseDB(DBBase):
         biz_id = self._resolve_biz_id(biz_id)
         # RPC 경로
         try:
-            res = self.client.rpc('get_dashboard_revenue_trend', {
-                'p_days': days,
-            }).execute()
+            rpc_params = {'p_days': days}
+            if biz_id is not None:
+                rpc_params['p_biz_id'] = biz_id
+            res = self.client.rpc('get_dashboard_revenue_trend', rpc_params).execute()
             data = res.data
             if isinstance(data, list):
                 return [

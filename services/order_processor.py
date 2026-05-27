@@ -1180,12 +1180,12 @@ class OrderProcessor:
                 "line_code": self._safe_int(row.get('code'), 0),
                 "sort_order": self._safe_int(row.get('sort'), 999),
                 "qty": self._safe_int(row.get('qty'), 1),
-                "unit_price": self._safe_float(row.get('_unit_price'), 0),
-                "total_amount": self._safe_float(row.get('_total_amount'), 0),
-                "discount_amount": self._safe_float(row.get('_discount'), 0),
-                "settlement": self._safe_float(row.get('_settlement'), 0),
-                "commission": self._safe_float(row.get('_commission'), 0),
-                "shipping_fee": self._safe_float(row.get('_shipping_fee'), 0),
+                "unit_price": self._safe_int(row.get('_unit_price'), 0),
+                "total_amount": self._safe_int(row.get('_total_amount'), 0),
+                "discount_amount": self._safe_int(row.get('_discount'), 0),
+                "settlement": self._safe_int(row.get('_settlement'), 0),
+                "commission": self._safe_int(row.get('_commission'), 0),
+                "shipping_fee": self._safe_int(row.get('_shipping_fee'), 0),
             }
 
             # 개인정보 분리 (카카오는 배송정보 없음)

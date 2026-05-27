@@ -2677,17 +2677,29 @@ class SupabaseDB(DBBase):
             # 3단계: 배치 INSERT
             # hub 스키마에 없는 컬럼 제거 (order_datetime, shipping_fee 등)
             _DROP_COLS = {"order_datetime", "shipping_fee", "phone2", "memo"}
+
+            def _sanitize_txn(row: dict) -> dict:
+                """float→int 변환 (PostgreSQL INTEGER 타입 거부 방지)."""
+                out = {}
+                for k, v in row.items():
+                    if k in _DROP_COLS:
+                        continue
+                    if isinstance(v, float) and not (v != v) and v == int(v):
+                        out[k] = int(v)
+                    else:
+                        out[k] = v
+                return out
+
             if to_insert:
                 try:
-                    rows = [{k: v for k, v in t[0].items() if k not in _DROP_COLS}
-                            for t in to_insert]
+                    rows = [_sanitize_txn(t[0]) for t in to_insert]
                     self.client.table("order_transactions").insert(rows).execute()
                     inserted += len(rows)
                 except Exception as e:
                     # 배치 실패 시 개별 재시도
                     for txn_data, row_i in to_insert:
                         try:
-                            self.client.table("order_transactions").insert(txn_data).execute()
+                            self.client.table("order_transactions").insert(_sanitize_txn(txn_data)).execute()
                             inserted += 1
                         except Exception as e2:
                             failed += 1
@@ -2955,9 +2967,8 @@ class SupabaseDB(DBBase):
         """주문 출고 완료 표시."""
         biz_id = self._resolve_biz_id(biz_id)
         try:
+            # revenue_category 컬럼은 hub 스키마에 없음 — 제외
             update_data = {"is_outbound_done": True, "outbound_date": outbound_date}
-            if revenue_category:
-                update_data["revenue_category"] = revenue_category
             for chunk_start in range(0, len(order_ids), 50):
                 chunk = order_ids[chunk_start:chunk_start + 50]
                 q = self.client.table("order_transactions").update(update_data) \

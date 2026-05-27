@@ -141,7 +141,7 @@ def run_order_processing(app, date_from: str, date_to: str) -> dict:
                         order_file=excel_buf,
                         option_file=None,
                         invoice_file=None,
-                        target_type='출고',
+                        target_type='송장',   # DB 저장 + 재고차감 포함 경로
                         output_dir=None,
                         db=db,
                         option_source='db',
@@ -150,12 +150,16 @@ def run_order_processing(app, date_from: str, date_to: str) -> dict:
                         biz_id=biz_id,
                     )
 
-                    if proc_result.get('success'):
-                        saved = proc_result.get('saved_count', len(df))
+                    # success 플래그 또는 db_result 기준으로 저장 여부 판단
+                    db_res = (proc_result or {}).get('db_result', {}) or {}
+                    saved = db_res.get('inserted', 0) + db_res.get('updated', 0)
+                    if proc_result and (proc_result.get('success') or saved > 0):
                         ch_result['saved'] = saved
-                        logger.info(f'[SyncScheduler] {channel} order_transactions 저장: {saved}건')
+                        logger.info(f'[SyncScheduler] {channel} order_transactions 저장: '
+                                    f'신규 {db_res.get("inserted",0)}건, '
+                                    f'갱신 {db_res.get("updated",0)}건')
                     else:
-                        err = proc_result.get('error', '알 수 없는 오류')
+                        err = (proc_result or {}).get('error') or '알 수 없는 오류'
                         ch_result['errors'].append(f'OrderProcessor: {err}')
                         logger.warning(f'[SyncScheduler] {channel} OrderProcessor 실패: {err}')
 

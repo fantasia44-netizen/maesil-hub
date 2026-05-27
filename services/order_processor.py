@@ -190,7 +190,7 @@ class OrderProcessor:
 
     def run(self, mode, order_file, option_file, invoice_file, target_type, output_dir,
             db=None, option_source='file', save_to_db=False, uploaded_by=None,
-            collection_date=None, opt_list_override=None):
+            collection_date=None, opt_list_override=None, biz_id=None):
         """
         mode: '스마트스토어'|'자사몰'|'쿠팡'|'옥션/G마켓'|'오아시스'|'11번가'|'카카오'
         order_file: file-like object or path
@@ -222,8 +222,20 @@ class OrderProcessor:
             'error': None
         }
 
+        # output_dir: None이면 임시 디렉토리 사용 (스케줄러 자동처리 시)
+        if output_dir is None:
+            import tempfile
+            output_dir = tempfile.mkdtemp(prefix='hub_orders_')
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
+
+        # biz_id: 명시 시 g.biz_id 설정 (멀티테넌트 격리)
+        if biz_id is not None:
+            try:
+                from flask import g
+                g.biz_id = biz_id
+            except Exception:
+                pass
 
         # ── 작업로그 시작 기록 ──
         import time as _time

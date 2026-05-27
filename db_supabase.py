@@ -181,13 +181,15 @@ class SupabaseDB(DBBase):
 
     def _resolve_biz_id(self, biz_id):
         """biz_id 명시 우선, 없으면 Flask g.biz_id fallback.
+        request context 또는 app context(스케줄러) 양쪽 모두 지원.
         Flask context 밖에서 호출 + biz_id None 이면 None 반환 (호출자가 _with_biz 로 처리).
         """
         if biz_id is not None:
             return biz_id
         try:
-            from flask import g, has_request_context
-            if has_request_context():
+            from flask import g, has_request_context, has_app_context
+            # request context 우선, 없으면 app context (스케줄러 백그라운드 스레드)
+            if has_request_context() or has_app_context():
                 return getattr(g, 'biz_id', None)
         except Exception:
             pass

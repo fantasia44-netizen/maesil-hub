@@ -131,7 +131,7 @@ def login():
         test = urlparse(urljoin(request.host_url, target))
         return test.scheme in ('http', 'https') and ref.netloc == test.netloc
     _next = request.args.get('next', '')
-    next_url = _next if (_next and _is_safe_url(_next)) else url_for('main.dashboard')
+    next_url = _next if (_next and _is_safe_url(_next)) else None  # 로그인 후 결정
 
     if not email or not password:
         flash('이메일/비밀번호 입력', 'danger')
@@ -179,12 +179,17 @@ def login():
     user = HubUser(user_row)
     login_user(user)
 
-    # primary 회사 자동 선택 (슈퍼어드민은 스킵 → 항상 /admin/ 으로)
-    if not user.is_super_admin:
+    # primary 회사 자동 선택 (슈퍼어드민은 스킵 → 어드민 대시보드로)
+    if user.is_super_admin:
+        if next_url is None:
+            next_url = url_for('admin_saas.dashboard')
+    else:
         ubm = client.table('user_business_map').select('biz_id') \
             .eq('user_id', user.id).order('is_primary', desc=True).order('id').execute()
         if ubm.data:
             session['current_biz_id'] = ubm.data[0]['biz_id']
+        if next_url is None:
+            next_url = url_for('main.dashboard')
 
     # 4) 실패 카운터 리셋 + last_login 업데이트
     client.table('app_users').update({

@@ -141,7 +141,7 @@ def fetch_all(client, table):
 # 이 컬럼이 있으면 INSERT 대신 UPSERT(DO NOTHING) 사용
 TABLE_CONFLICT_COLS = {
     'order_transactions': 'biz_id,channel,order_no,line_no',
-    'order_shipping':     'biz_id,order_no',
+    'order_shipping':     None,   # unique constraint 없음 → pre-delete 후 plain INSERT
     'import_runs':        None,   # id-based only (id 드롭하므로 insert 사용)
     'stock_ledger':       None,
 }
@@ -282,9 +282,9 @@ def migrate_table(src, dst, table, dry_run=False):
             # 빈 문자열을 date/timestamp 컬럼에 넣으면 PostgreSQL fail
             if mapped_k in DATE_COLS and (v == '' or v is None):
                 new[mapped_k] = None
-            # float → int (PostgreSQL INTEGER 타입은 float 거부)
-            elif mapped_k in INT_COLS and isinstance(v, float):
-                new[mapped_k] = int(round(v))
+            # float → int: 정수값 float은 모두 int로 변환 (PostgreSQL INTEGER 타입 거부 방지)
+            elif isinstance(v, float) and not (v != v) and v == int(v):
+                new[mapped_k] = int(v)
             else:
                 new[mapped_k] = v
         new['biz_id'] = TARGET_BIZ_ID

@@ -215,6 +215,29 @@ def run_order_processing(app, date_from: str, date_to: str) -> dict:
     return results
 
 
+def run_invoice_auto(app) -> dict:
+    """취소 확인 → CJ 송장 자동 생성 1회 실행.
+
+    run_order_processing() 완료 후 자동 호출됨.
+    1) cancel_check_service — 마켓 API로 취소 여부 확인 + DB 마킹
+    2) cj_shipping_service  — 취소 아닌 주문에 CJ 운송장 채번 + 예약접수
+    """
+    try:
+        with app.app_context():
+            from db_utils import get_db
+            from services.marketplace import MarketplaceManager
+            from services.invoice_auto_service import run_invoice_auto as _run
+
+            db = get_db()
+            mgr = MarketplaceManager(db=db)
+            result = _run(db, mgr)
+            logger.info(f'[SyncScheduler] 송장 자동생성 완료: {result}')
+            return result
+    except Exception as e:
+        logger.error(f'[SyncScheduler] run_invoice_auto 오류: {e}', exc_info=True)
+        return {'error': str(e)}
+
+
 def run_settlement_sync(app) -> dict:
     """전체 채널 정산 수집 1회 실행."""
     from db_utils import get_db
@@ -282,6 +305,9 @@ def start_sync_scheduler(app) -> None:
                         if has_new:
                             logger.info('[SyncScheduler] 신규 주문 감지 → 자동 처리 시작')
                             run_order_processing(app, date_from, date_to)
+                            # 취소 확인 → CJ 송장 자동 생성
+                            if _AUTO_PROCESS:
+                                run_invoice_auto(app)
                         else:
                             logger.info('[SyncScheduler] 신규 주문 없음 — 자동처리 스킵')
                 except Exception as e:

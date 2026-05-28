@@ -113,13 +113,16 @@ def _split_order_by_cust_key(order: dict) -> list:
 def query_orders_without_invoice(db, channel=None, date_from=None, date_to=None, limit=500):
     """송장 미배정 주문 조회 (order_shipping에서 invoice_no 없는 건).
 
+    shipping_status = '접수' (OrderProcessor 저장 시 기본값) 이고
+    취소('취소') 가 아닌 건만 대상.
+
     Returns:
-        [{channel, order_no, name, phone, address, memo, products: [{name, qty}]}]
+        [{channel, order_no, recipient_name, recipient_phone, address, products: [{product_name, qty}]}]
     """
     try:
         q = db.client.table("order_shipping") \
-            .select("channel, order_no, name, phone, address, memo, shipping_status")
-        q = q.eq("shipping_status", "대기")
+            .select("channel, order_no, recipient_name, recipient_phone, address, shipping_status")
+        q = q.eq("shipping_status", "접수")
         q = q.or_("invoice_no.is.null,invoice_no.eq.")
 
         if channel:
@@ -159,10 +162,9 @@ def query_orders_without_invoice(db, channel=None, date_from=None, date_to=None,
             result.append({
                 'channel': s['channel'],
                 'order_no': ono,
-                'name': s.get('name', ''),
-                'phone': s.get('phone', ''),
+                'recipient_name': s.get('recipient_name', ''),
+                'recipient_phone': s.get('recipient_phone', ''),
                 'address': s.get('address', ''),
-                'memo': s.get('memo', ''),
                 'products': products_map.get(ono, [{'product_name': '이유식', 'qty': 1}]),
             })
         return result
@@ -233,8 +235,8 @@ def generate_cj_invoices(db, orders: list, sender: dict = None):
                 result = client.register_shipment(
                     sender=sender,
                     receiver={
-                        'name': order.get('name', ''),
-                        'phone': order.get('phone', ''),
+                        'name': order.get('recipient_name', ''),
+                        'phone': order.get('recipient_phone', ''),
                         'zipcode': addr_parts['zipcode'],
                         'address': addr_parts['address'],
                         'detail_address': addr_parts['detail_address'],
@@ -257,7 +259,7 @@ def generate_cj_invoices(db, orders: list, sender: dict = None):
                     })
                     results.append({
                         'order_no': order['order_no'],
-                        'name': order.get('name', ''),
+                        'name': order.get('recipient_name', ''),
                         'invoice_no': invoice_no,
                         'cj_account': acct_label,
                         'ok': True,
@@ -266,7 +268,7 @@ def generate_cj_invoices(db, orders: list, sender: dict = None):
                     failed += 1
                     results.append({
                         'order_no': order['order_no'],
-                        'name': order.get('name', ''),
+                        'name': order.get('recipient_name', ''),
                         'invoice_no': invoice_no,
                         'cj_account': acct_label,
                         'ok': False,

@@ -1,10 +1,11 @@
 """sync_scheduler.py — 마켓플레이스 주문/정산 자동 수집 + 처리 스케줄러.
 
 앱 시작 시 start_sync_scheduler(app) 1회 호출.
-기본: 30분마다 전체 채널 주문 수집 → 자동 변환 → 재고차감, 6시간마다 정산 수집.
+주문 수집: KST 기준 지정 시각(SYNC_ORDER_HOURS_KST)에만 실행 → 자동 변환 → 재고차감.
+정산 수집: 6시간마다.
 
 환경변수:
-    SYNC_ORDER_INTERVAL_MIN   주문 수집 주기 (분, 기본 30)
+    SYNC_ORDER_HOURS_KST      주문 수집 시각 (KST, 쉼표 구분, 기본 '8,9,12,13,15')
     SYNC_SETTLE_INTERVAL_MIN  정산 수집 주기 (분, 기본 360)
     SYNC_DAYS_BACK            수집 기준 일수 (기본 2 — 오늘+전일)
     SYNC_ENABLED              '0'이면 스케줄러 비활성 (기본 '1')
@@ -16,23 +17,50 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
-_ORDER_INTERVAL  = int(os.environ.get('SYNC_ORDER_INTERVAL_MIN', '30')) * 60
+# KST = UTC+9
+_KST = timezone(timedelta(hours=9))
+
+# 주문 수집 실행 시각 (KST hour) — 기본: 8, 9, 12, 13, 15시
+_raw_hours = os.environ.get('SYNC_ORDER_HOURS_KST', '8,9,12,13,15')
+_ORDER_HOURS_KST: frozenset[int] = frozenset(
+    int(h.strip()) for h in _raw_hours.split(',') if h.strip().isdigit()
+)
+
 _SETTLE_INTERVAL = int(os.environ.get('SYNC_SETTLE_INTERVAL_MIN', '360')) * 60
 _DAYS_BACK       = int(os.environ.get('SYNC_DAYS_BACK', '2'))
 _ENABLED         = os.environ.get('SYNC_ENABLED', '1') != '0'
 _AUTO_PROCESS    = os.environ.get('SYNC_AUTO_PROCESS', '1') != '0'  # 수집 후 자동 변환·재고차감
 
-_last_order_sync: datetime | None = None
-_last_settle_sync: datetime | None = None
+_last_order_sync: datetime | None = None   # UTC aware
+_last_settle_sync: datetime | None = None  # UTC aware
 _lock = threading.Lock()
 
 
+def _now_kst() -> datetime:
+    """현재 KST datetime 반환."""
+    return datetime.now(tz=_KST)
+
+
+def _should_run_order_sync() -> bool:
+    """현재 KST 시각이 수집 대상 hour이고, 해당 hour에 아직 실행하지 않았으면 True."""
+    now_kst = _now_kst()
+    if now_kst.hour not in _ORDER_HOURS_KST:
+        return False
+    if _last_order_sync is None:
+        return True
+    # _last_order_sync 를 KST로 변환해서 같은 날 같은 hour에 이미 실행했으면 스킵
+    last_kst = _last_order_sync.astimezone(_KST)
+    already_ran = (last_kst.date() == now_kst.date() and
+                   last_kst.hour == now_kst.hour)
+    return not already_ran
+
+
 def _date_range(days_back: int = _DAYS_BACK) -> tuple[str, str]:
-    today = datetime.utcnow().date()
+    today = _now_kst().date()  # KST 기준 오늘
     date_from = (today - timedelta(days=days_back)).isoformat()
     date_to = today.isoformat()
     return date_from, date_to
@@ -234,12 +262,11 @@ def start_sync_scheduler(app) -> None:
         logger.info('[SyncScheduler] 스케줄러 워커 시작')
 
         while True:
-            now = datetime.utcnow()
+            now_utc = datetime.now(tz=timezone.utc)
             with _lock:
-                run_orders = (_last_order_sync is None or
-                              (now - _last_order_sync).total_seconds() >= _ORDER_INTERVAL)
+                run_orders = _should_run_order_sync()
                 run_settle = (_last_settle_sync is None or
-                              (now - _last_settle_sync).total_seconds() >= _SETTLE_INTERVAL)
+                              (now_utc - _last_settle_sync).total_seconds() >= _SETTLE_INTERVAL)
 
             if run_orders:
                 date_from, date_to = _date_range()
@@ -260,7 +287,7 @@ def start_sync_scheduler(app) -> None:
                 except Exception as e:
                     logger.error(f'[SyncScheduler] 주문 수집/처리 예외: {e}')
                 with _lock:
-                    _last_order_sync = datetime.utcnow()
+                    _last_order_sync = datetime.now(tz=timezone.utc)
 
             if run_settle:
                 try:
@@ -268,14 +295,15 @@ def start_sync_scheduler(app) -> None:
                 except Exception as e:
                     logger.error(f'[SyncScheduler] 정산 수집 예외: {e}')
                 with _lock:
-                    _last_settle_sync = datetime.utcnow()
+                    _last_settle_sync = datetime.now(tz=timezone.utc)
 
             time.sleep(60)  # 1분마다 조건 체크
 
     t = threading.Thread(target=_worker, daemon=True, name='marketplace-sync-scheduler')
     t.start()
-    logger.info(f'[SyncScheduler] 시작 (주문={_ORDER_INTERVAL//60}분, '
-                f'정산={_SETTLE_INTERVAL//60}분, days_back={_DAYS_BACK})')
+    hours_str = ','.join(str(h) for h in sorted(_ORDER_HOURS_KST))
+    logger.info(f'[SyncScheduler] 시작 (주문수집=KST {hours_str}시, '
+                f'정산={_SETTLE_INTERVAL//60}분마다, days_back={_DAYS_BACK})')
 
 
 def get_sync_status() -> dict:
@@ -284,8 +312,25 @@ def get_sync_status() -> dict:
         return {
             'enabled': _ENABLED,
             'auto_process': _AUTO_PROCESS,
-            'order_interval_min': _ORDER_INTERVAL // 60,
+            'order_hours_kst': sorted(_ORDER_HOURS_KST),
             'settle_interval_min': _SETTLE_INTERVAL // 60,
             'last_order_sync': _last_order_sync.isoformat() if _last_order_sync else None,
             'last_settle_sync': _last_settle_sync.isoformat() if _last_settle_sync else None,
+            'next_order_sync_kst': _next_order_sync_kst(),
         }
+
+
+def _next_order_sync_kst() -> str | None:
+    """다음 주문 수집 예정 시각 (KST ISO 문자열)."""
+    if not _ORDER_HOURS_KST:
+        return None
+    now_kst = _now_kst()
+    today = now_kst.date()
+    for h in sorted(_ORDER_HOURS_KST):
+        candidate = datetime(today.year, today.month, today.day, h, 0, 0, tzinfo=_KST)
+        if candidate > now_kst:
+            return candidate.isoformat()
+    # 오늘 남은 시각 없으면 내일 첫 번째
+    tomorrow = today + timedelta(days=1)
+    h = min(_ORDER_HOURS_KST)
+    return datetime(tomorrow.year, tomorrow.month, tomorrow.day, h, 0, 0, tzinfo=_KST).isoformat()

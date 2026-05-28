@@ -190,7 +190,8 @@ class OrderProcessor:
 
     def run(self, mode, order_file, option_file, invoice_file, target_type, output_dir,
             db=None, option_source='file', save_to_db=False, uploaded_by=None,
-            collection_date=None, opt_list_override=None, biz_id=None):
+            collection_date=None, opt_list_override=None, biz_id=None,
+            allow_unmatched=False):
         """
         mode: '스마트스토어'|'자사몰'|'쿠팡'|'옥션/G마켓'|'오아시스'|'11번가'|'카카오'
         order_file: file-like object or path
@@ -404,8 +405,9 @@ class OrderProcessor:
             # ※ 2026-04-24 정책:
             #   - 100점(정확 매칭)만 자동 반영
             #   - <100점은 needs_review 로 분리 → 사용자 팝업 승인 후에만 적용
-            unmatched = []       # 후보 없는 완전 미매칭
+            unmatched = []       # 후보 없는 완전 미매칭 (key 문자열 목록)
             needs_review = []    # 부분매칭 후보 존재 (사용자 확인 필요)
+            unmatched_raw_rows = []  # 미매칭 row 원본 (allow_unmatched=True 시 DB 저장용)
             matched_keys = set()
             for i, r in target.iterrows():
                 try:
@@ -487,6 +489,26 @@ class OrderProcessor:
                         # 매칭 실패 또는 부분매칭(사용자 확인 필요)
                         if not k:
                             continue
+                        # 미매칭 row 원본 데이터 수집 (allow_unmatched=True 시 DB 저장용)
+                        _addr_front = self.get_safe_val(r, m['a']) if m.get('a') is not None else ''
+                        _addr_detail = self.get_safe_val(r, m['a2']) if m.get('a2') is not None else ''
+                        _full_addr = f"{_addr_front} {_addr_detail}".strip() if _addr_detail else _addr_front
+                        _qty_val = pd.to_numeric(self.get_safe_val(r, m['qty']), errors='coerce')
+                        _raw_dict = {str(df.columns[ci]): str(r.iloc[ci]) for ci in range(len(r)) if str(r.iloc[ci]).strip()}
+                        unmatched_raw_rows.append({
+                            'order_no':         self.get_safe_val(r, m['no']) if m.get('no') is not None else '',
+                            'order_date':       self.get_safe_val(r, m['date']) if m.get('date') is not None else '',
+                            'original_option':  v_opt,
+                            'original_product': v_prod,
+                            'qty':              int(_qty_val) if not pd.isna(_qty_val) else 1,
+                            'name':             self.get_safe_val(r, m['n']) if m.get('n') is not None else '',
+                            'phone':            re.sub(r'[^0-9]', '', self.get_safe_val(r, m['p1'])) if m.get('p1') is not None else '',
+                            'address':          _full_addr,
+                            'memo':             self.get_safe_val(r, m['msg']) if m.get('msg') is not None else '',
+                            'match_key':        k,
+                            'has_candidates':   bool(candidates),
+                            '_raw_data':        _raw_dict,
+                        })
                         if candidates:
                             # 부분매칭 후보 존재 → needs_review
                             # 동일 key 중복 방지
@@ -533,6 +555,11 @@ class OrderProcessor:
             if needs_review:
                 if target_type in ("리얼패킹", "외부일괄"):
                     self.log(f"⚠️ 부분매칭 {len(needs_review)}건 — 리얼패킹 모드라 정확매칭분만 처리")
+                elif allow_unmatched:
+                    # 자동수집 모드: 미매칭은 DB에 'unmatched' 상태로 저장, 매칭된 건만 계속 처리
+                    self.log(f"⚠️ 부분매칭 {len(needs_review)}건 → 미매칭 DB 저장 후 계속 처리")
+                    result['needs_review'] = needs_review
+                    result['unmatched_raw_rows'] = unmatched_raw_rows
                 else:
                     self.log(f"🔍 부분매칭 {len(needs_review)}건 → 사용자 확인 필요")
                     msg = (
@@ -543,6 +570,7 @@ class OrderProcessor:
                     result['error'] = msg
                     result['needs_review'] = needs_review
                     result['unmatched'] = unmatched
+                    result['unmatched_raw_rows'] = unmatched_raw_rows
                     return result
 
             # 미매칭 항목 처리 (후보도 없는 완전 미등록)
@@ -550,6 +578,11 @@ class OrderProcessor:
                 if target_type in ("리얼패킹", "외부일괄"):
                     # 리얼패킹/외부일괄은 송장 후처리 → 미매칭 경고만, 매칭된 건으로 계속 진행
                     self.log(f"⚠️ 옵션 미등록 {len(unmatched)}건 (리얼패킹이므로 매칭된 건만 처리)")
+                elif allow_unmatched:
+                    # 자동수집 모드: 미매칭은 DB에 'unmatched' 상태로 저장, 매칭된 건만 계속 처리
+                    self.log(f"⚠️ 옵션 미등록 {len(unmatched)}건 → 미매칭 DB 저장 후 계속 처리")
+                    result['unmatched'] = unmatched
+                    result['unmatched_raw_rows'] = unmatched_raw_rows
                 else:
                     self.log(f"⚠️ 옵션 미등록 {len(unmatched)}건 발견 → 처리 중단")
                     msg = f"옵션리스트에 등록되지 않은 상품 {len(unmatched)}건:\n\n"
@@ -560,6 +593,7 @@ class OrderProcessor:
                     msg += f"\n옵션마스터에 위 상품명을 등록 후 다시 실행하세요."
                     result['error'] = msg
                     result['unmatched'] = unmatched
+                    result['unmatched_raw_rows'] = unmatched_raw_rows
                     return result
 
             if not res:
@@ -582,6 +616,18 @@ class OrderProcessor:
                     _ship_seen.add(grp_key)
             if _ship_dedup_count:
                 self.log(f"📦 배송비 중복제거: {_ship_dedup_count}건 (동일주문 첫 행만 유지)")
+
+            # ─── [Phase 1-A] 미매칭 주문 DB 저장 (allow_unmatched=True 시) ───
+            if save_to_db and db is not None and allow_unmatched and unmatched_raw_rows:
+                try:
+                    saved_unmatched = self._save_unmatched_orders_to_db(
+                        db, mode, unmatched_raw_rows, uploaded_by,
+                        collection_date=collection_date, biz_id=biz_id
+                    )
+                    result['unmatched_saved'] = saved_unmatched
+                    self.log(f"📋 미매칭 주문 DB 저장: {saved_unmatched}건 (option_match_status=unmatched)")
+                except Exception as ue:
+                    self.log(f"⚠️ 미매칭 주문 DB 저장 실패: {ue}")
 
             # ─── [Phase 1] DB 저장 (실패해도 송장 생성은 계속) ───
             if save_to_db and db is not None:
@@ -1243,6 +1289,110 @@ class OrderProcessor:
                 db_result['realtime_error'] = str(rt_err)
 
         return db_result
+
+    def _save_unmatched_orders_to_db(self, db, channel, unmatched_raw_rows, uploaded_by,
+                                      collection_date=None, biz_id=None):
+        """미매칭 주문을 order_transactions에 option_match_status='unmatched' 로 저장.
+
+        option_master 에 없는 옵션값을 가진 주문을 DB에 보존,
+        사용자가 '미매칭 관리' 메뉴에서 수동 매칭 후 송장 생성 가능.
+
+        Returns:
+            int: 저장된 건수
+        """
+        from services.tz_utils import today_kst
+        import hashlib, json as _json
+
+        coll_date = collection_date or today_kst()
+        saved = 0
+
+        # biz_id 세팅
+        if biz_id is not None:
+            try:
+                from flask import g
+                g.biz_id = biz_id
+            except Exception:
+                pass
+
+        for row in unmatched_raw_rows:
+            try:
+                order_no = str(row.get('order_no', '')).strip()
+                if not order_no:
+                    continue
+
+                order_date = self._parse_date(row.get('order_date', ''))
+                raw_dict = row.get('_raw_data', {})
+                raw_hash = hashlib.sha256(
+                    _json.dumps(raw_dict, sort_keys=True, ensure_ascii=False).encode()
+                ).hexdigest()
+
+                transaction = {
+                    "channel":           channel,
+                    "order_date":        order_date,
+                    "collection_date":   coll_date,
+                    "order_no":          order_no,
+                    "line_no":           1,
+                    "original_option":   str(row.get('original_option', ''))[:500],
+                    "original_product":  str(row.get('original_product', ''))[:500],
+                    "raw_data":          raw_dict,
+                    "raw_hash":          raw_hash,
+                    "parser_version":    "1.0",
+                    "product_name":      "",   # 매칭 후 채워짐
+                    "barcode":           "",
+                    "line_code":         0,
+                    "sort_order":        999,
+                    "qty":               int(row.get('qty', 1)),
+                    "unit_price":        0,
+                    "total_amount":      0,
+                    "option_match_status": "unmatched",
+                    "is_outbound_done":  False,
+                }
+
+                shipping = None
+                if row.get('name'):
+                    shipping = {
+                        "channel":          channel,
+                        "order_no":         order_no,
+                        "recipient_name":   str(row.get('name', '')),
+                        "recipient_phone":  str(row.get('phone', '')),
+                        "address":          str(row.get('address', '')),
+                        "shipping_status":  "미매칭",
+                    }
+
+                # upsert — 이미 존재하면 option_match_status 갱신 안 함 (수동매칭 보호)
+                try:
+                    existing = db.client.table("order_transactions") \
+                        .select("id, option_match_status") \
+                        .eq("channel", channel) \
+                        .eq("order_no", order_no) \
+                        .limit(1).execute()
+                    if existing.data:
+                        # 이미 있는 주문 — 수동매칭 된 경우 덮어쓰기 방지
+                        ex = existing.data[0]
+                        if ex.get('option_match_status') not in ('unmatched', None):
+                            continue  # auto/manual → skip
+                except Exception:
+                    pass
+
+                db.client.table("order_transactions").upsert(
+                    {**transaction, **({"biz_id": biz_id} if biz_id else {})},
+                    on_conflict="channel,order_no,line_no",
+                ).execute()
+
+                if shipping:
+                    try:
+                        db.client.table("order_shipping").upsert(
+                            shipping,
+                            on_conflict="channel,order_no",
+                        ).execute()
+                    except Exception:
+                        pass
+
+                saved += 1
+            except Exception as e:
+                self.log(f"[UNMATCH_SAVE] {row.get('order_no','')} 저장 실패: {e}")
+
+        return saved
 
     def _parse_date(self, date_str):
         """주문일 문자열 → YYYY-MM-DD 형식으로 파싱 (KST 기준)"""

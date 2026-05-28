@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %}미매칭 주문 관리 - 배마마 통합시스템{% endblock %}
+{% block page_title %}미매칭 주문 관리{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <span class="badge bg-warning text-dark fs-6">미매칭 {{ total }}건</span>
+    <small class="text-muted ms-2">옵션마스터에 없는 주문 — 수동 매칭 후 CJ 송장 생성</small>
+  </div>
+  <div>
+    <!-- 채널 필터 -->
+    <form class="d-inline-flex gap-2" method="get">
+      <select class="form-select form-select-sm" name="channel" onchange="this.form.submit()">
+        <option value="">전체 채널</option>
+        {% for ch in channels %}
+        <option value="{{ ch }}" {% if ch == channel_filter %}selected{% endif %}>{{ ch }}</option>
+        {% endfor %}
+      </select>
+    </form>
+  </div>
+</div>
+
+{% if not orders %}
+<div class="alert alert-success">
+  <i class="bi bi-check-circle"></i> 미매칭 주문이 없습니다.
+</div>
+{% else %}
+
+<!-- 일괄매칭 패널 -->
+<div class="card mb-3 border-warning">
+  <div class="card-header bg-warning bg-opacity-25 fw-bold">
+    <i class="bi bi-lightning-charge"></i> 일괄 매칭
+    <small class="text-muted">(동일 원문옵션을 한 번에 매칭)</small>
+  </div>
+  <div class="card-body">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label form-label-sm">원문 옵션명</label>
+        <input type="text" id="batchOriginalOption" class="form-control form-control-sm"
+               placeholder="여기에 원문옵션 입력 또는 아래 행 클릭">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label form-label-sm">매칭할 품목</label>
+        <select id="batchMatchKey" class="form-select form-select-sm">
+          <option value="">-- 품목 선택 --</option>
+          {% for opt in opt_list %}
+          <option value="{{ opt.get('Key', opt.get('원문명','')) }}">
+            {{ opt.get('품목명','') }} ({{ opt.get('원문명','')[:40] }})
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-2">
+        <div class="form-check mt-4">
+          <input class="form-check-input" type="checkbox" id="batchGenInvoice">
+          <label class="form-check-label" for="batchGenInvoice">송장도 생성</label>
+        </div>
+      </div>
+      <div class="col-md-2">
+        <button class="btn btn-warning btn-sm w-100" onclick="doBatchMatch()">
+          <i class="bi bi-collection"></i> 일괄 매칭
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 목록 테이블 -->
+<div class="table-responsive">
+<table class="table table-sm table-hover align-middle">
+  <thead class="table-dark">
+    <tr>
+      <th>채널</th>
+      <th>주문번호</th>
+      <th>주문일</th>
+      <th>원문 상품명</th>
+      <th>원문 옵션</th>
+      <th>수량</th>
+      <th>매칭 품목 선택</th>
+      <th>처리</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for o in orders %}
+    <tr id="row-{{ o.id }}" data-original-option="{{ o.original_option }}"
+        onclick="fillBatchOption(this)" style="cursor:pointer">
+      <td><span class="badge bg-secondary">{{ o.channel }}</span></td>
+      <td><small class="text-muted">{{ o.order_no }}</small></td>
+      <td>{{ (o.order_date or '')[:10] }}</td>
+      <td class="text-truncate" style="max-width:150px" title="{{ o.original_product }}">
+        {{ o.original_product or '-' }}
+      </td>
+      <td class="text-truncate" style="max-width:200px" title="{{ o.original_option }}">
+        <strong>{{ o.original_option or '-' }}</strong>
+      </td>
+      <td>{{ o.qty }}</td>
+      <td onclick="event.stopPropagation()">
+        <select class="form-select form-select-sm opt-select" id="sel-{{ o.id }}">
+          <option value="">-- 선택 --</option>
+          {% for opt in opt_list %}
+          <option value="{{ opt.get('Key', opt.get('원문명','')) }}">
+            {{ opt.get('품목명','') }} ({{ opt.get('원문명','')[:35] }})
+          </option>
+          {% endfor %}
+        </select>
+      </td>
+      <td onclick="event.stopPropagation()">
+        <div class="d-flex gap-1">
+          <button class="btn btn-sm btn-primary" onclick="doMatch({{ o.id }}, false)">
+            매칭
+          </button>
+          <button class="btn btn-sm btn-success" onclick="doMatch({{ o.id }}, true)">
+            매칭+송장
+          </button>
+          <button class="btn btn-sm btn-outline-secondary" onclick="doIgnore({{ o.id }})">
+            무시
+          </button>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<!-- 페이지네이션 -->
+{% if total_pages > 1 %}
+<nav>
+  <ul class="pagination pagination-sm justify-content-center">
+    {% for p in range(1, total_pages + 1) %}
+    <li class="page-item {% if p == page %}active{% endif %}">
+      <a class="page-link" href="?page={{ p }}{% if channel_filter %}&channel={{ channel_filter }}{% endif %}">{{ p }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+</nav>
+{% endif %}
+{% endif %}
+
+<script>
+const CSRF_TOKEN = "{{ csrf_token() }}";
+
+function fillBatchOption(row) {
+  document.getElementById('batchOriginalOption').value = row.dataset.originalOption;
+}
+
+async function doMatch(orderId, genInvoice) {
+  const sel = document.getElementById('sel-' + orderId);
+  const matchKey = sel ? sel.value : '';
+  if (!matchKey) { alert('매칭할 품목을 선택하세요.'); return; }
+
+  const res = await fetch(`/unmatched/${orderId}/match`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
+    body: JSON.stringify({ match_key: matchKey, generate_invoice: genInvoice }),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    const row = document.getElementById('row-' + orderId);
+    if (row) row.remove();
+    let msg = `✅ 매칭 완료: ${data.product_name}`;
+    if (genInvoice && data.invoice) {
+      const inv = data.invoice;
+      msg += inv.ok !== false
+        ? ` | 송장: ${inv.success || 0}건 생성`
+        : ` | 송장 오류: ${inv.error || ''}`;
+    }
+    showToast(msg, 'success');
+    updateBadge();
+  } else {
+    showToast('❌ 오류: ' + (data.error || '알 수 없는 오류'), 'danger');
+  }
+}
+
+async function doIgnore(orderId) {
+  if (!confirm('이 주문을 무시(취소) 처리하시겠습니까?')) return;
+  const res = await fetch(`/unmatched/${orderId}/ignore`, {
+    method: 'POST',
+    headers: { 'X-CSRFToken': CSRF_TOKEN },
+  });
+  const data = await res.json();
+  if (data.ok) {
+    const row = document.getElementById('row-' + orderId);
+    if (row) row.remove();
+    showToast('주문 무시 처리 완료', 'secondary');
+    updateBadge();
+  } else {
+    showToast('❌ 오류: ' + (data.error || ''), 'danger');
+  }
+}
+
+async function doBatchMatch() {
+  const originalOption = document.getElementById('batchOriginalOption').value.trim();
+  const matchKey       = document.getElementById('batchMatchKey').value;
+  const genInvoice     = document.getElementById('batchGenInvoice').checked;
+
+  if (!originalOption) { alert('원문 옵션명을 입력하세요.'); return; }
+  if (!matchKey) { alert('매칭할 품목을 선택하세요.'); return; }
+
+  const res = await fetch('/unmatched/batch_match', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
+    body: JSON.stringify({ original_option: originalOption, match_key: matchKey, generate_invoice: genInvoice }),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    showToast(`✅ 일괄매칭 완료: ${data.updated}건 → ${data.product_name}`, 'success');
+    setTimeout(() => location.reload(), 1500);
+  } else {
+    showToast('❌ 오류: ' + (data.error || ''), 'danger');
+  }
+}
+
+function showToast(msg, type = 'info') {
+  const t = document.createElement('div');
+  t.className = `alert alert-${type} position-fixed bottom-0 end-0 m-3`;
+  t.style.zIndex = 9999;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+function updateBadge() {
+  const rows = document.querySelectorAll('tbody tr');
+  document.querySelector('.badge.bg-warning').textContent = `미매칭 ${rows.length}건`;
+}
+</script>
+{% endblock %}

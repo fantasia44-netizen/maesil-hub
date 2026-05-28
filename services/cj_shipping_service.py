@@ -122,6 +122,7 @@ def query_orders_without_invoice(db, channel=None, date_from=None, date_to=None,
     try:
         q = db.client.table("order_shipping") \
             .select("channel, order_no, recipient_name, recipient_phone, address, shipping_status")
+        # 미매칭 주문(shipping_status='미매칭')은 자동 제외됨 — '접수' 상태만 대상
         q = q.eq("shipping_status", "접수")
         q = q.or_("invoice_no.is.null,invoice_no.eq.")
 

@@ -176,7 +176,19 @@ def run_order_processing(app, date_from: str, date_to: str) -> dict:
                         save_to_db=True,
                         uploaded_by='(자동수집)',
                         biz_id=biz_id,
+                        allow_unmatched=True,  # 미매칭 → DB 저장 후 계속, 매칭분만 송장
                     )
+
+                    # 미매칭 건 수집 로그
+                    _unmatched_saved = (proc_result or {}).get('unmatched_saved', 0)
+                    _unmatched_keys  = (proc_result or {}).get('unmatched', [])
+                    if _unmatched_saved or _unmatched_keys:
+                        logger.warning(
+                            f'[SyncScheduler] {channel} 미매칭 주문 {_unmatched_saved}건 → '
+                            f'미매칭 관리 메뉴에서 수동매칭 필요 '
+                            f'(키: {[k[:60] for k in _unmatched_keys[:5]]})'
+                        )
+                        ch_result['unmatched_saved'] = _unmatched_saved
 
                     # success 플래그 또는 db_result 기준으로 저장 여부 판단
                     db_res = (proc_result or {}).get('db_result', {}) or {}
@@ -186,6 +198,10 @@ def run_order_processing(app, date_from: str, date_to: str) -> dict:
                         logger.info(f'[SyncScheduler] {channel} order_transactions 저장: '
                                     f'신규 {db_res.get("inserted",0)}건, '
                                     f'갱신 {db_res.get("updated",0)}건')
+                    elif _unmatched_saved:
+                        # 전부 미매칭이라도 저장은 성공
+                        ch_result['saved'] = 0
+                        logger.info(f'[SyncScheduler] {channel} 매칭 0건 (전부 미매칭)')
                     else:
                         err = (proc_result or {}).get('error') or '알 수 없는 오류'
                         ch_result['errors'].append(f'OrderProcessor: {err}')

@@ -105,6 +105,10 @@
        href="/orders/"><i class="bi bi-bag-check"></i> 주문관리</a>
     <a class="nav-link {% if request.path.startswith('/orders/upload') %}active{% endif %}"
        href="/orders/upload" style="padding-left:32px;font-size:12.5px"><i class="bi bi-upload"></i> 엑셀업로드</a>
+    <a class="nav-link {% if request.path.startswith('/unmatched') %}active{% endif %}"
+       href="/unmatched/" style="padding-left:32px;font-size:12.5px">
+      <i class="bi bi-exclamation-triangle text-warning"></i> 미매칭 관리
+    </a>
     <a class="nav-link {% if request.path.startswith('/shipment') %}active{% endif %}"
        href="/shipment/"><i class="bi bi-truck"></i> 출고관리</a>
     <a class="nav-link {% if request.path.startswith('/outbound') and not request.path.startswith('/etc') %}active{% endif %}"

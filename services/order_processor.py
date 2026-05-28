@@ -596,8 +596,22 @@ class OrderProcessor:
                     result['unmatched_raw_rows'] = unmatched_raw_rows
                     return result
 
+            # ─── [Phase 1-A] 미매칭 주문 DB 저장 (allow_unmatched=True 시) ───
+            # ※ 반드시 "if not res" 조기 리턴보다 앞에 위치해야 함.
+            #   전체 미매칭(res 빈 경우)에도 미매칭 주문이 DB에 저장되어야 하므로.
+            if save_to_db and db is not None and allow_unmatched and unmatched_raw_rows:
+                try:
+                    saved_unmatched = self._save_unmatched_orders_to_db(
+                        db, mode, unmatched_raw_rows, uploaded_by,
+                        collection_date=collection_date, biz_id=biz_id
+                    )
+                    result['unmatched_saved'] = saved_unmatched
+                    self.log(f"📋 미매칭 주문 DB 저장: {saved_unmatched}건 (option_match_status=unmatched)")
+                except Exception as ue:
+                    self.log(f"⚠️ 미매칭 주문 DB 저장 실패: {ue}")
+
             if not res:
-                self.log("❌ 매칭 데이터 0건")
+                self.log("❌ 매칭 데이터 0건 (미매칭 주문은 별도 저장됨)" if unmatched_raw_rows else "❌ 매칭 데이터 0건")
                 result['error'] = "매칭 데이터 0건"
                 return result
 
@@ -616,18 +630,6 @@ class OrderProcessor:
                     _ship_seen.add(grp_key)
             if _ship_dedup_count:
                 self.log(f"📦 배송비 중복제거: {_ship_dedup_count}건 (동일주문 첫 행만 유지)")
-
-            # ─── [Phase 1-A] 미매칭 주문 DB 저장 (allow_unmatched=True 시) ───
-            if save_to_db and db is not None and allow_unmatched and unmatched_raw_rows:
-                try:
-                    saved_unmatched = self._save_unmatched_orders_to_db(
-                        db, mode, unmatched_raw_rows, uploaded_by,
-                        collection_date=collection_date, biz_id=biz_id
-                    )
-                    result['unmatched_saved'] = saved_unmatched
-                    self.log(f"📋 미매칭 주문 DB 저장: {saved_unmatched}건 (option_match_status=unmatched)")
-                except Exception as ue:
-                    self.log(f"⚠️ 미매칭 주문 DB 저장 실패: {ue}")
 
             # ─── [Phase 1] DB 저장 (실패해도 송장 생성은 계속) ───
             if save_to_db and db is not None:

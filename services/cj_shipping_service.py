@@ -256,6 +256,7 @@ def generate_cj_invoices(db, orders: list, sender: dict = None):
                         'order_no': order['order_no'],
                         'invoice_no': invoice_no,
                         'courier': 'CJ대한통운',
+                        'shipping_status': '대기',  # CJ 채번 완료 → 마켓 push 대기
                     })
                     results.append({
                         'order_no': order['order_no'],

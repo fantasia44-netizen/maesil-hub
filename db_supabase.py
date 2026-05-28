@@ -3690,6 +3690,7 @@ class SupabaseDB(DBBase):
             if self.update_order_shipping_invoice(
                 u['channel'], u['order_no'],
                 u['invoice_no'], u.get('courier'),
+                shipping_status=u.get('shipping_status'),
                 biz_id=biz_id
             ):
                 count += 1

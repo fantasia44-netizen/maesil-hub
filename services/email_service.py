@@ -31,7 +31,7 @@ def _get_resend_config() -> tuple[str, str]:
         api_key = os.environ.get('RESEND_API_KEY', '')
     if not from_email:
         import os
-        from_email = os.environ.get('RESEND_FROM_EMAIL', 'noreply@maesil-hub.com')
+        from_email = os.environ.get('RESEND_FROM_EMAIL', '매실 허브 <noreply@maesil-insight.com>')
 
     return api_key.strip(), from_email.strip()
 

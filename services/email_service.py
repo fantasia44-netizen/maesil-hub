@@ -118,3 +118,43 @@ def send_invite_email(to_email: str, biz_name: str,
 </body>
 </html>"""
     return send_email(to_email, subject, html)
+
+
+def send_password_reset_email(to_email: str, name: str, reset_url: str) -> bool:
+    """비밀번호 재설정 이메일 발송."""
+    subject = '[매실 허브] 비밀번호 재설정 안내'
+    greeting = f'<strong>{name}</strong>님, ' if name else ''
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="UTF-8"></head>
+<body style="font-family:Apple SD Gothic Neo,Malgun Gothic,sans-serif;background:#f8f9fa;margin:0;padding:32px;">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;
+              padding:40px;box-shadow:0 2px 12px rgba(0,0,0,.08);">
+    <div style="text-align:center;margin-bottom:28px;">
+      <span style="font-size:32px;">🍑</span>
+      <h2 style="color:#2d6a4f;margin:8px 0 0;">매실 허브</h2>
+    </div>
+    <h3 style="color:#1a1a1a;margin-bottom:16px;">비밀번호 재설정</h3>
+    <p style="color:#444;line-height:1.7;">
+      {greeting}비밀번호 재설정을 요청하셨습니다.<br>
+      아래 버튼을 클릭해 새 비밀번호를 설정해 주세요.
+    </p>
+    <div style="text-align:center;margin:32px 0;">
+      <a href="{reset_url}"
+         style="background:#2d6a4f;color:#fff;padding:14px 36px;border-radius:8px;
+                text-decoration:none;font-weight:700;font-size:16px;display:inline-block;">
+        비밀번호 재설정
+      </a>
+    </div>
+    <p style="color:#888;font-size:13px;text-align:center;margin-top:24px;">
+      이 링크는 <strong>1시간</strong> 후 만료됩니다.<br>
+      본인이 요청하지 않으셨다면 이 이메일을 무시해 주세요.
+    </p>
+    <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
+    <p style="color:#aaa;font-size:11px;text-align:center;">
+      매실 허브 — 식품·축산 ERP/WMS SaaS
+    </p>
+  </div>
+</body>
+</html>"""
+    return send_email(to_email, subject, html)

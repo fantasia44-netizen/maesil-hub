@@ -306,12 +306,11 @@ def forgot_password():
 
     if mail_sent:
         flash('비밀번호 재설정 링크를 이메일로 발송했습니다. (유효시간 1시간)', 'success')
-        return render_template('auth/forgot_password.html')
     else:
-        # SMTP 미설정: 관리자 전용 — 링크 직접 표시
-        flash('이메일 발송 설정이 없습니다. 아래 링크를 복사해 사용하세요.', 'warning')
-        return render_template('auth/forgot_password.html',
-                               reset_url=reset_url, show_link=True)
+        # 이메일 미설정 — 링크 화면 노출 금지 (보안상 이메일 확인 필수)
+        flash('이메일 발송에 실패했습니다. 관리자에게 문의해 주세요.', 'danger')
+
+    return render_template('auth/forgot_password.html')
 
 
 

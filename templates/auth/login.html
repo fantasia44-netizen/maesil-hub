@@ -18,6 +18,9 @@
           </div>
           <button type="submit" class="btn btn-success w-100">로그인</button>
         </form>
+        <div class="text-center mt-2">
+          <small><a href="{{ url_for('auth.forgot_password') }}" class="text-muted">비밀번호를 잊으셨나요?</a></small>
+        </div>
         <hr>
         <div class="text-center">
           <small>계정 없으신가요? <a href="{{ url_for('auth.signup') }}">14일 무료 시작</a></small>

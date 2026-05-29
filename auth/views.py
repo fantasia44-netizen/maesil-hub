@@ -247,6 +247,186 @@ def change_password():
     return redirect(url_for('main.dashboard'))
 
 
+# ─── 비밀번호 찾기 ───
+@auth_bp.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    """비밀번호 재설정 요청 — 이메일 입력 → 토큰 발급 → 메일 발송 (또는 화면 표시)."""
+    if current_user.is_authenticated:
+        return redirect(url_for('main.dashboard'))
+
+    if request.method == 'GET':
+        return render_template('auth/forgot_password.html')
+
+    import secrets
+    from datetime import datetime, timezone, timedelta
+
+    email = request.form.get('email', '').strip().lower()
+    if not email:
+        flash('이메일을 입력해 주세요.', 'danger')
+        return render_template('auth/forgot_password.html')
+
+    client = get_admin_client()
+
+    # 가입된 이메일인지 확인
+    res = client.table('app_users').select('id, name, email') \
+        .eq('email', email).eq('is_deleted', False).limit(1).execute()
+
+    # 보안상 존재 여부 노출 안 함 — 항상 동일 메시지
+    if not res.data:
+        flash('입력하신 이메일로 재설정 링크를 발송했습니다. (등록된 경우)', 'info')
+        return render_template('auth/forgot_password.html')
+
+    user_row = res.data[0]
+
+    # 기존 미사용 토큰 무효화
+    try:
+        client.table('password_reset_tokens') \
+            .update({'used_at': datetime.now(timezone.utc).isoformat()}) \
+            .eq('email', email).is_('used_at', 'null').execute()
+    except Exception:
+        pass
+
+    # 새 토큰 생성 (1시간 유효)
+    token = secrets.token_urlsafe(32)
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+
+    client.table('password_reset_tokens').insert({
+        'user_id':    user_row['id'],
+        'email':      email,
+        'token':      token,
+        'expires_at': expires_at,
+    }).execute()
+
+    # 재설정 URL
+    reset_url = url_for('auth.reset_password', token=token, _external=True)
+
+    # 이메일 발송 시도 (SMTP 환경변수 있을 때만)
+    mail_sent = _send_reset_email(email, user_row.get('name', ''), reset_url)
+
+    if mail_sent:
+        flash('비밀번호 재설정 링크를 이메일로 발송했습니다. (유효시간 1시간)', 'success')
+        return render_template('auth/forgot_password.html')
+    else:
+        # SMTP 미설정: 관리자 전용 — 링크 직접 표시
+        flash('이메일 발송 설정이 없습니다. 아래 링크를 복사해 사용하세요.', 'warning')
+        return render_template('auth/forgot_password.html',
+                               reset_url=reset_url, show_link=True)
+
+
+def _send_reset_email(to_email: str, name: str, reset_url: str) -> bool:
+    """SMTP로 비밀번호 재설정 이메일 발송. 환경변수 없으면 False 반환."""
+    import os, smtplib
+    from email.mime.text import MIMEText
+    from email.mime.multipart import MIMEMultipart
+
+    smtp_host = os.environ.get('SMTP_HOST', '')
+    smtp_port = int(os.environ.get('SMTP_PORT', 587))
+    smtp_user = os.environ.get('SMTP_USER', '')
+    smtp_pass = os.environ.get('SMTP_PASS', '')
+
+    if not smtp_host or not smtp_user or not smtp_pass:
+        return False
+
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = '[배마마] 비밀번호 재설정 안내'
+        msg['From']    = smtp_user
+        msg['To']      = to_email
+
+        html = f"""
+<p>안녕하세요 {name}님,</p>
+<p>비밀번호 재설정 요청이 접수되었습니다.<br>
+아래 버튼을 클릭해 새 비밀번호를 설정하세요. (유효시간: 1시간)</p>
+<p>
+  <a href="{reset_url}"
+     style="display:inline-block;padding:12px 24px;background:#198754;
+            color:#fff;text-decoration:none;border-radius:6px;font-size:15px;">
+    비밀번호 재설정
+  </a>
+</p>
+<p style="font-size:12px;color:#666;">
+  이 링크는 1시간 후 만료됩니다.<br>
+  본인이 요청하지 않은 경우 이 이메일을 무시하세요.
+</p>
+"""
+        msg.attach(MIMEText(html, 'html', 'utf-8'))
+
+        with smtplib.SMTP(smtp_host, smtp_port) as s:
+            s.ehlo()
+            s.starttls()
+            s.login(smtp_user, smtp_pass)
+            s.sendmail(smtp_user, [to_email], msg.as_string())
+        return True
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f'[Auth] 이메일 발송 실패: {e}')
+        return False
+
+
+# ─── 비밀번호 재설정 ───
+@auth_bp.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token: str):
+    """토큰 검증 → 새 비밀번호 설정."""
+    if current_user.is_authenticated:
+        return redirect(url_for('main.dashboard'))
+
+    from datetime import datetime, timezone
+
+    client = get_admin_client()
+
+    def _get_token_row():
+        try:
+            res = client.table('password_reset_tokens').select('*') \
+                .eq('token', token).is_('used_at', 'null').limit(1).execute()
+            return res.data[0] if res.data else None
+        except Exception:
+            return None
+
+    token_row = _get_token_row()
+
+    if not token_row:
+        flash('유효하지 않거나 이미 사용된 링크입니다.', 'danger')
+        return redirect(url_for('auth.forgot_password'))
+
+    # 만료 확인
+    expires_at = token_row.get('expires_at', '')
+    try:
+        exp_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+        if datetime.now(timezone.utc) > exp_dt:
+            flash('링크가 만료되었습니다. 다시 요청해 주세요.', 'danger')
+            return redirect(url_for('auth.forgot_password'))
+    except Exception:
+        pass
+
+    if request.method == 'GET':
+        return render_template('auth/reset_password.html', token=token)
+
+    new_pw     = request.form.get('new_password', '')
+    confirm_pw = request.form.get('confirm_password', '')
+
+    if len(new_pw) < 10:
+        flash('비밀번호는 최소 10자 이상이어야 합니다.', 'danger')
+        return render_template('auth/reset_password.html', token=token)
+    if new_pw != confirm_pw:
+        flash('비밀번호가 일치하지 않습니다.', 'danger')
+        return render_template('auth/reset_password.html', token=token)
+
+    # 비밀번호 업데이트
+    user_id = token_row['user_id']
+    client.table('app_users').update({
+        'password_hash': hash_password(new_pw),
+    }).eq('id', user_id).execute()
+
+    # 토큰 소진
+    client.table('password_reset_tokens').update({
+        'used_at': datetime.now(timezone.utc).isoformat(),
+    }).eq('token', token).execute()
+
+    log_audit('reset_password', user_id=user_id)
+    flash('비밀번호가 성공적으로 변경되었습니다. 로그인해 주세요.', 'success')
+    return redirect(url_for('auth.login'))
+
+
 # ─── 초대 수락 ───
 @auth_bp.route('/join/<token>', methods=['GET', 'POST'])
 def join_invite(token: str):

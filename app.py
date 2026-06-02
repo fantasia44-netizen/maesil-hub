@@ -221,6 +221,13 @@ def create_app():
     except Exception as e:
         logging.warning(f'ERP blueprints registration failed: {e}')
 
+    # ─── CSRF exempt: 외부 서버 webhook (HMAC 자체 검증) ───
+    try:
+        from blueprints.billing import webhook as billing_webhook
+        csrf.exempt(billing_webhook)
+    except Exception as e:
+        logging.warning(f'billing webhook csrf exempt 실패: {e}')
+
     # ─── Health check (매실에이전시용) ───
     @app.route('/health')
     def health():

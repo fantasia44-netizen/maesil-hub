@@ -175,7 +175,8 @@ def login():
         flash('이메일 또는 비밀번호 오류', 'danger')
         return redirect(url_for('auth.login'))
 
-    # 3) 로그인 성공
+    # 3) 로그인 성공 — 세션 재생성으로 Session Fixation 방지
+    session.clear()
     user = HubUser(user_row)
     login_user(user)
 
@@ -204,7 +205,7 @@ def login():
 
 
 # ─── 로그아웃 ───
-@auth_bp.route('/logout', methods=['GET', 'POST'])
+@auth_bp.route('/logout', methods=['POST'])
 @login_required
 def logout():
     log_audit('logout', user_id=current_user.id, biz_id=session.get('current_biz_id'))
@@ -286,18 +287,20 @@ def forgot_password():
     except Exception:
         pass
 
-    # 새 토큰 생성 (1시간 유효)
+    # 새 토큰 생성 (1시간 유효) — DB에는 SHA-256 해시만 저장
+    import hashlib
     token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
 
     client.table('password_reset_tokens').insert({
         'user_id':    user_row['id'],
         'email':      email,
-        'token':      token,
+        'token':      token_hash,   # 해시값 저장 (평문 노출 방지)
         'expires_at': expires_at,
     }).execute()
 
-    # 재설정 URL
+    # 재설정 URL — 원본 토큰(raw) 전달
     reset_url = url_for('auth.reset_password', token=token, _external=True)
 
     # 이메일 발송 시도 (Resend API 키 설정 시)
@@ -327,8 +330,10 @@ def reset_password(token: str):
 
     def _get_token_row():
         try:
+            import hashlib
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
             res = client.table('password_reset_tokens').select('*') \
-                .eq('token', token).is_('used_at', 'null').limit(1).execute()
+                .eq('token', token_hash).is_('used_at', 'null').limit(1).execute()
             return res.data[0] if res.data else None
         except Exception:
             return None
@@ -482,9 +487,12 @@ def join_invite(token: str):
     mode = request.form.get('mode', 'login')
 
     if mode == 'login':
-        # 기존 계정으로 합류
+        # 기존 계정으로 합류 — 초대 대상 이메일과 일치해야 함
         email    = request.form.get('email', '').strip().lower()
         password = request.form.get('password', '')
+        if email != inv['email']:
+            flash(f'초대받은 이메일({inv["email"]})로 로그인해야 합니다.', 'danger')
+            return redirect(url_for('auth.join_invite', token=token))
         res = client.table('app_users').select('*') \
             .eq('email', email).eq('is_deleted', False).execute()
         if not res.data or not verify_password(password, res.data[0]['password_hash']):

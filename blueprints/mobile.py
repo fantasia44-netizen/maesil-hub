@@ -9,6 +9,7 @@ from flask_login import login_required, current_user
 
 from models import INV_TYPE_LABELS, REVENUE_CATEGORIES
 from auth import role_required
+from auth.decorators import biz_required
 from db_utils import get_db
 
 mobile_bp = Blueprint('mobile', __name__, url_prefix='/m')
@@ -16,6 +17,7 @@ mobile_bp = Blueprint('mobile', __name__, url_prefix='/m')
 
 @mobile_bp.route('/')
 @login_required
+@biz_required
 def home():
     """모바일 홈 — CEO는 대시보드로 자동 이동"""
     if current_user.role == 'ceo':
@@ -25,6 +27,7 @@ def home():
 
 @mobile_bp.route('/stock')
 @login_required
+@biz_required
 def stock():
     """모바일 재고현황"""
     date_str = request.args.get('date', '')
@@ -61,6 +64,7 @@ def stock():
 
 @mobile_bp.route('/revenue')
 @login_required
+@biz_required
 def revenue():
     """모바일 매출현황"""
     date_from = request.args.get('date_from', '')
@@ -90,6 +94,7 @@ def revenue():
 
 @mobile_bp.route('/partners')
 @login_required
+@biz_required
 def partners():
     """모바일 거래처목록"""
     db = get_db()
@@ -113,6 +118,7 @@ def partners():
 
 @mobile_bp.route('/history')
 @login_required
+@biz_required
 def history():
     """모바일 이력조회"""
     date_from = request.args.get('date_from', '')
@@ -163,6 +169,8 @@ def history():
 
 
 @mobile_bp.route('/ceo')
+@login_required
+@biz_required
 @role_required('admin', 'ceo')
 def ceo_dashboard():
     """CEO 모바일 대시보드 — 매출 그래프 + KPI"""

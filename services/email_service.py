@@ -36,6 +36,12 @@ def _get_resend_config() -> tuple[str, str]:
     return api_key.strip(), from_email.strip()
 
 
+def _h(text: str) -> str:
+    """HTML 이스케이프 헬퍼 — 이메일 템플릿 XSS 방지."""
+    import html as _html
+    return _html.escape(str(text or ''))
+
+
 def send_email(to: str, subject: str, html: str) -> bool:
     """단순 이메일 발송. 성공 시 True, 실패 시 False."""
     api_key, from_email = _get_resend_config()
@@ -82,7 +88,7 @@ def send_invite_email(to_email: str, biz_name: str,
                       inviter_name: str, role_label: str,
                       join_url: str) -> bool:
     """팀 초대 이메일 발송."""
-    subject = f'[매실 허브] {biz_name}에서 팀 초대가 도착했습니다'
+    subject = f'[매실 허브] {_h(biz_name)}에서 팀 초대가 도착했습니다'
     html = f"""<!DOCTYPE html>
 <html lang="ko">
 <head><meta charset="UTF-8"></head>
@@ -95,9 +101,9 @@ def send_invite_email(to_email: str, biz_name: str,
     </div>
     <h3 style="color:#1a1a1a;margin-bottom:16px;">팀 초대</h3>
     <p style="color:#444;line-height:1.7;">
-      <strong>{inviter_name}</strong>님이 <strong>{biz_name}</strong>의
+      <strong>{_h(inviter_name)}</strong>님이 <strong>{_h(biz_name)}</strong>의
       팀원으로 초대했습니다.<br>
-      역할: <span style="background:#e8f5e9;color:#2d6a4f;padding:2px 8px;border-radius:4px;font-weight:600;">{role_label}</span>
+      역할: <span style="background:#e8f5e9;color:#2d6a4f;padding:2px 8px;border-radius:4px;font-weight:600;">{_h(role_label)}</span>
     </p>
     <div style="text-align:center;margin:32px 0;">
       <a href="{join_url}"
@@ -123,7 +129,7 @@ def send_invite_email(to_email: str, biz_name: str,
 def send_password_reset_email(to_email: str, name: str, reset_url: str) -> bool:
     """비밀번호 재설정 이메일 발송."""
     subject = '[매실 허브] 비밀번호 재설정 안내'
-    greeting = f'<strong>{name}</strong>님, ' if name else ''
+    greeting = f'<strong>{_h(name)}</strong>님, ' if name else ''
     html = f"""<!DOCTYPE html>
 <html lang="ko">
 <head><meta charset="UTF-8"></head>

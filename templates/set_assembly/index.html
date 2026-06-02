@@ -207,7 +207,7 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 
 // BOM 데이터 (서버에서 전달)
-const bomData = {{ bom_data_json|safe }};
+const bomData = JSON.parse({{ bom_data_json|tojson }});
 
 // 품목 캐시 (부재료 자동완성용)
 let productCache = [];

@@ -9,9 +9,18 @@ from flask import (
     flash, redirect, url_for, jsonify,
 )
 from flask_login import login_required, current_user
+from flask import g
 
 from auth import role_required
+from auth.helpers import get_user_role
 from db_utils import get_db
+
+
+def _get_current_role():
+    """현재 세션 biz_id에서 실제 역할 조회 (슈퍼어드민은 항상 admin)."""
+    if current_user.is_super_admin:
+        return 'admin'
+    return get_user_role(current_user.id, getattr(g, 'biz_id', None)) or 'viewer'
 
 closing_bp = Blueprint('closing', __name__, url_prefix='/closing')
 
@@ -86,7 +95,7 @@ def api_close():
         return jsonify({'error': '날짜와 마감 유형을 확인하세요.'}), 400
 
     # 권한 체크: 매출마감=영업부(admin,manager,sales), 재고마감=물류팀(admin,manager,logistics)
-    role = current_user.role
+    role = _get_current_role()
     if closing_type == 'revenue' and role not in ('admin', 'manager', 'sales'):
         return jsonify({'error': '매출마감은 영업부만 가능합니다.'}), 403
     if closing_type == 'stock' and role not in ('admin', 'manager', 'logistics'):
@@ -123,7 +132,7 @@ def api_reopen():
         return jsonify({'error': '날짜와 마감 유형을 확인하세요.'}), 400
 
     # 권한 체크 (동일)
-    role = current_user.role
+    role = _get_current_role()
     if closing_type == 'revenue' and role not in ('admin', 'manager', 'sales'):
         return jsonify({'error': '매출마감 해제는 영업부만 가능합니다.'}), 403
     if closing_type == 'stock' and role not in ('admin', 'manager', 'logistics'):

@@ -20,6 +20,7 @@ from flask import (
     Blueprint, render_template, request, jsonify, current_app, g,
 )
 from flask_login import current_user
+from flask_wtf.csrf import csrf_exempt
 
 from auth.decorators import login_required, biz_required
 from auth.helpers import log_audit
@@ -474,6 +475,7 @@ def refund():
 # ─────────────── webhook ───────────────
 
 @billing_bp.route('/webhook', methods=['POST'])
+@csrf_exempt
 def webhook():
     """PortOne v2 webhook. HMAC verified via Standard Webhooks headers."""
     from services.portone import verify_webhook

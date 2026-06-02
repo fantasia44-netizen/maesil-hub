@@ -1048,10 +1048,12 @@ class SupabaseDB(DBBase):
         row = self.get_closing_status(closing_date, closing_type)
         return row is not None and row.get('status') == 'closed'
 
-    def close_day(self, closing_date, closing_type, closed_by, cutoff_time='15:05', memo=''):
-        """일일마감 실행."""
+    def close_day(self, closing_date, closing_type, closed_by, cutoff_time='15:05', memo='', biz_id=None):
+        """일일마감 실행. biz_id 테넌트 격리 적용."""
         from datetime import datetime, timezone
+        biz_id = self._resolve_biz_id(biz_id)
         payload = {
+            'biz_id': biz_id,
             'closing_date': closing_date,
             'closing_type': closing_type,
             'status': 'closed',
@@ -1061,7 +1063,7 @@ class SupabaseDB(DBBase):
             'memo': memo,
         }
         self.client.table("daily_closing").upsert(
-            payload, on_conflict="closing_date,closing_type"
+            payload, on_conflict="biz_id,closing_date,closing_type"
         ).execute()
 
     def reopen_day(self, closing_date, closing_type, reopened_by, memo='', biz_id=None):

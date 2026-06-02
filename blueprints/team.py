@@ -207,11 +207,11 @@ def invite():
 
     msg = f'{email} 초대 완료 (역할: {role_label})'
     if not sent:
-        msg += f' — 이메일 발송 실패. 직접 링크: {join_url}'
-        logger.warning(f'[Team] 초대 링크 (이메일 미발송): {join_url}')
+        msg += ' — 이메일 발송 실패. 관리자에게 문의하세요.'
+        logger.warning(f'[Team] 초대 링크 (이메일 미발송): {join_url}')  # 서버 로그에만 기록
 
     if request.is_json:
-        return jsonify({'status': 'ok', 'message': msg, 'join_url': join_url, 'sent': sent})
+        return jsonify({'status': 'ok', 'message': msg, 'sent': sent})  # join_url 응답 노출 금지
     flash(msg, 'success' if sent else 'warning')
     return redirect(url_for('team.index'))
 

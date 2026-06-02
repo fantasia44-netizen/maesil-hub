@@ -526,6 +526,11 @@ def shipping_file_download():
     if not path:
         return jsonify({'error': 'path 파라미터 필요'}), 400
 
+    # 경로 순회 방어: 현재 biz_id 프리픽스로만 접근 허용
+    biz_id = getattr(g, 'biz_id', None)
+    if biz_id and not path.startswith(f'{biz_id}/'):
+        return jsonify({'error': '접근 권한이 없습니다.'}), 403
+
     try:
         url = db.get_output_file_signed_url(path, expires_in=300)  # 5분 유효
         if not url:

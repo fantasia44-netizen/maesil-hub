@@ -96,9 +96,9 @@ def api_history():
                 groups[tid]['in_rows'].append(r)
 
         result = []
-        for tid, g in groups.items():
-            out_rows = g['out_rows']
-            in_rows = g['in_rows']
+        for tid, grp in groups.items():
+            out_rows = grp['out_rows']
+            in_rows = grp['in_rows']
             ref = (out_rows or in_rows)[0]
             from_loc = out_rows[0]['location'] if out_rows else ''
             to_loc = in_rows[0]['location'] if in_rows else ''

@@ -496,7 +496,17 @@ def sync_log():
             log['started_at_kst'] = _utc_to_kst_str(log['started_at'])
         if log.get('finished_at'):
             log['finished_at_kst'] = _utc_to_kst_str(log['finished_at'])
-    return render_template('marketplace/sync_log.html', logs=logs, channel=channel)
+    channel_labels = {
+        '스마트스토어_배마마': '스마트스토어 (배마마)',
+        '스마트스토어': '스마트스토어',
+        '쿠팡': '쿠팡',
+        '자사몰': '자사몰 (Cafe24)',
+        '11번가': '11번가',
+        '옥션': '옥션/G마켓',
+        '카카오': '카카오쇼핑',
+    }
+    return render_template('marketplace/sync_log.html', logs=logs, channel=channel,
+                           channel_labels=channel_labels)
 
 
 @marketplace_bp.route('/api/sync-status')

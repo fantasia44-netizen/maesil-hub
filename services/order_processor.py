@@ -303,31 +303,49 @@ class OrderProcessor:
                 opt_list = opt_raw.to_dict('records')
                 prepare_opt_list(opt_list)
 
-            # [검증] 같은 출력순서(E열)에 품목명(B열)이 다른 경우 체크
+            # [검증/자동통일] 같은 출력순서(E열)에 품목명(B열)이 섞인 경우.
+            # 출력순서=제품 1:1(피킹 라인)이므로 최빈 품목명을 정답으로 자동통일.
+            # (1+1 옵션 등록 시 품목명 칸에 옵션텍스트를 잘못 넣어도 다수결로 자동교정 →
+            #  주문처리 중단 없음. 최빈값이 동수인 진짜 충돌만 사람이 고치도록 블록.)
             # — 빈 품목명, 헤더 잔여값(Standard_Name 등), 출력순서 999(미지정)는 검증 제외
             _bad_names = {'', 'standard_name', 'product_name', '품목명'}
             check_df = opt_raw[
                 (opt_raw['출력순서'] != 999) &
                 (~opt_raw['품목명'].str.strip().str.lower().isin(_bad_names))
             ].copy()
-            line_groups = check_df.groupby('출력순서')['품목명'].apply(lambda x: list(x.unique())).to_dict()
-            conflict_lines = {k: v for k, v in line_groups.items() if len(v) > 1}
-            if conflict_lines:
-                err_msg = "⚠️ 옵션리스트 품목명 불일치!\n같은 라인(출력순서)에 품목명이 다릅니다.\n품목명을 통일해주세요.\n\n"
-                for line, names in conflict_lines.items():
+
+            sort_to_name = {}     # {출력순서: 정답 품목명(최빈값)}
+            ambiguous = {}        # 동수 충돌 → 블록
+            for ln, grp in check_df.groupby('출력순서')['품목명']:
+                counts = grp.value_counts()
+                if len(counts) == 1:
+                    sort_to_name[ln] = counts.index[0]
+                elif counts.iloc[0] > counts.iloc[1]:
+                    winner = counts.index[0]
+                    sort_to_name[ln] = winner
+                    outliers = ', '.join(f"'{n}'×{c}" for n, c in counts.items() if n != winner)
+                    self.log(f"⚠️ 라인 {int(ln)} 품목명 자동통일 → '{winner}' "
+                             f"(이견 {outliers} — 옵션관리에서 품목명 정리 권장)")
+                else:
+                    ambiguous[ln] = list(counts.index)
+
+            if ambiguous:
+                err_msg = ("⚠️ 옵션리스트 품목명 불일치!\n같은 라인(출력순서)에 품목명이 "
+                           "동수로 갈려 자동판단이 안 됩니다.\n품목명을 통일해주세요.\n\n")
+                for line, names in ambiguous.items():
                     err_msg += f"  라인 {int(line)}: {' / '.join(names)}\n"
                 self.log(err_msg)
                 result['error'] = err_msg
                 return result
 
-            # 같은 출력순서(E열)끼리 품목명 통일 (B열이 동일한 경우 안전하게 정리)
-            line_to_name = {}
-            for _, row in opt_raw.iterrows():
-                ln = row['출력순서']
-                if ln not in line_to_name:
-                    line_to_name[ln] = row['품목명']
-                else:
-                    row['품목명'] = line_to_name[ln]
+            # 정답 품목명으로 통일 — opt_list(매칭 반환값) + opt_raw(집계표) 양쪽 반영
+            if sort_to_name:
+                for o in opt_list:
+                    _ln = pd.to_numeric(o.get('출력순서'), errors='coerce')
+                    _ln = 999 if pd.isna(_ln) else _ln
+                    if _ln in sort_to_name:
+                        o['품목명'] = sort_to_name[_ln]
+                opt_raw['품목명'] = opt_raw['출력순서'].map(sort_to_name).fillna(opt_raw['품목명'])
 
             # DB에서 로드한 경우 Key가 이미 있음, 파일에서 로드한 경우 위에서 설정
             if option_source == 'db':
@@ -427,7 +445,14 @@ class OrderProcessor:
                         clean_addr = re.sub(r'\s+', '', full_addr)
 
                         qty_val = pd.to_numeric(self.get_safe_val(r, m['qty']), errors='coerce')
-                        qty_int = int(qty_val) if not pd.isna(qty_val) else 1
+                        order_qty = int(qty_val) if not pd.isna(qty_val) else 1
+                        # 증정옵션(1+1/1+2) 수량배수 — 주문 1건이라도 출고·재고차감은 배수만큼.
+                        # 금액은 order_qty(결제수량) 기준 유지: 증정분은 무상이라 매출 미증가.
+                        try:
+                            _mult = int(match.get('수량배수') or 1)
+                        except (TypeError, ValueError):
+                            _mult = 1
+                        qty_int = order_qty * (_mult if _mult >= 1 else 1)
 
                         line_code_val = pd.to_numeric(match['라인코드'], errors='coerce')
                         line_code_int = int(line_code_val) if not pd.isna(line_code_val) else 0
@@ -466,10 +491,10 @@ class OrderProcessor:
                         if not row_data['_unit_price'] and (_item_price or _option_price):
                             row_data['_unit_price'] = _item_price + _option_price - _seller_discount
 
-                        # total_amount fallback: unit_price * qty
+                        # total_amount fallback: unit_price * 주문수량
+                        # (증정옵션 배수는 제외 — 고객 실결제 수량 기준으로 매출 계산)
                         if not row_data['_total_amount'] and row_data['_unit_price']:
-                            _qty = row_data.get('qty', 1) or 1
-                            row_data['_total_amount'] = row_data['_unit_price'] * _qty
+                            row_data['_total_amount'] = row_data['_unit_price'] * order_qty
 
                         # 원본 옵션/상품명
                         row_data['_original_option'] = self.get_safe_val(r, m['opt']) if m.get('opt') is not None else ''
@@ -527,6 +552,7 @@ class OrderProcessor:
                                             'barcode': c.get('바코드', ''),
                                             'line_code': c.get('라인코드', 0),
                                             'sort_order': c.get('출력순서', 999),
+                                            'qty_multiplier': int(c.get('수량배수', 1) or 1),
                                         }
                                         for c in candidates
                                     ],

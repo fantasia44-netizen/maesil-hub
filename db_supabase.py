@@ -1754,6 +1754,8 @@ class SupabaseDB(DBBase):
                 '라인코드': r.get('line_code', '0'),
                 '출력순서': float(r.get('sort_order', 999)),
                 '바코드': r.get('barcode', ''),
+                # 증정옵션 배수(1+1=2) — 출고수량·재고차감에만 적용, 매출은 주문수량 기준
+                '수량배수': int(r.get('qty_multiplier') or 1),
                 'Key': r.get('match_key', ''),
             })
         self._option_cache['data_list'] = result

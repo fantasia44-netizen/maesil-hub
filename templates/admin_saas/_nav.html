@@ -1,0 +1,15 @@
+{# 슈퍼어드민 공통 서브네비 — 사이드바 없는 admin 페이지 상단 #}
+<div class="d-flex align-items-center gap-2 mb-4 flex-wrap border-bottom pb-2">
+  <span class="fw-bold text-warning me-2"><i class="bi bi-shield-lock"></i> Super Admin</span>
+  <a class="btn btn-sm {% if request.endpoint=='admin_saas.dashboard' %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+     href="{{ url_for('admin_saas.dashboard') }}"><i class="bi bi-speedometer2"></i> 대시보드</a>
+  <a class="btn btn-sm {% if request.endpoint in ['admin_saas.businesses_list','admin_saas.business_detail'] %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+     href="{{ url_for('admin_saas.businesses_list') }}"><i class="bi bi-buildings"></i> 회원사</a>
+  <a class="btn btn-sm {% if request.endpoint=='admin_saas.payments_list' %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+     href="{{ url_for('admin_saas.payments_list') }}"><i class="bi bi-credit-card"></i> 결제</a>
+  <a class="btn btn-sm {% if request.endpoint=='admin_saas.notices_list' %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+     href="{{ url_for('admin_saas.notices_list') }}"><i class="bi bi-megaphone"></i> 공지</a>
+  <a class="btn btn-sm {% if request.endpoint=='admin_saas.config_list' %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+     href="{{ url_for('admin_saas.config_list') }}"><i class="bi bi-gear"></i> 시스템 설정</a>
+  <a class="btn btn-sm btn-outline-success ms-auto" href="{{ url_for('main.dashboard') }}"><i class="bi bi-box-arrow-left"></i> 앱으로</a>
+</div>

@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}공지 관리 — Super Admin{% endblock %}
+{% block content %}
+{% include 'admin_saas/_nav.html' %}
+
+<h3><i class="bi bi-megaphone"></i> 공지 / 점검 브로드캐스트</h3>
+<p class="text-muted small">활성 공지는 전체 사용자 상단에 배너로 표시됩니다. 기간(시작~종료)을 비우면 무제한.</p>
+
+<div class="row g-3">
+  <!-- 긴급 브로드캐스트 -->
+  <div class="col-lg-5">
+    <div class="card border-warning"><div class="card-header bg-warning bg-opacity-25"><i class="bi bi-lightning"></i> 긴급 브로드캐스트</div>
+      <div class="card-body">
+        <div class="mb-2">
+          <label class="form-label small">메시지</label>
+          <input type="text" id="bcMsg" class="form-control" placeholder="예: 15분 후 서버 점검 예정">
+        </div>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label small">유형</label>
+            <select id="bcType" class="form-select form-select-sm">
+              <option value="warning">warning (주황)</option>
+              <option value="danger">danger (빨강)</option>
+              <option value="info">info (파랑)</option>
+              <option value="success">success (초록)</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label small">지속(분)</label>
+            <input type="number" id="bcMin" class="form-control form-control-sm" value="30" min="1">
+          </div>
+        </div>
+        <button class="btn btn-warning mt-3 w-100" onclick="broadcast()"><i class="bi bi-broadcast"></i> 즉시 전송</button>
+        <div id="bcResult" class="small mt-2"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 예약 공지 생성 -->
+  <div class="col-lg-7">
+    <div class="card"><div class="card-header"><i class="bi bi-calendar-plus"></i> 공지 생성 (기간 지정)</div>
+      <div class="card-body">
+        <div class="mb-2">
+          <label class="form-label small">제목</label>
+          <input type="text" id="ncTitle" class="form-control" placeholder="공지 제목">
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">본문 (선택)</label>
+          <textarea id="ncBody" class="form-control" rows="2"></textarea>
+        </div>
+        <div class="row g-2">
+          <div class="col-md-3"><label class="form-label small">유형</label>
+            <select id="ncType" class="form-select form-select-sm">
+              <option value="info">info</option><option value="warning">warning</option>
+              <option value="danger">danger</option><option value="success">success</option>
+            </select></div>
+          <div class="col-md-4"><label class="form-label small">시작</label>
+            <input type="datetime-local" id="ncStart" class="form-control form-control-sm"></div>
+          <div class="col-md-4"><label class="form-label small">종료</label>
+            <input type="datetime-local" id="ncEnd" class="form-control form-control-sm"></div>
+        </div>
+        <button class="btn btn-primary mt-3" onclick="createNotice()"><i class="bi bi-plus-lg"></i> 공지 생성</button>
+        <div id="ncResult" class="small mt-2"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 공지 목록 -->
+<div class="card mt-3"><div class="card-header"><i class="bi bi-list-ul"></i> 공지 목록</div>
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0 align-middle">
+      <thead class="table-light"><tr><th>유형</th><th>제목</th><th>기간</th><th>작성자</th><th>활성</th></tr></thead>
+      <tbody>
+        {% for n in notices %}
+        <tr>
+          <td><span class="badge bg-{{ n.type if n.type in ['info','warning','danger','success'] else 'secondary' }}{% if n.type=='warning' %} text-dark{% endif %}">{{ n.type }}</span></td>
+          <td>{{ n.title }}</td>
+          <td class="small text-muted">{{ (n.starts_at or '')[:16]|replace('T',' ') }} ~ {{ (n.ends_at or '무제한')[:16]|replace('T',' ') }}</td>
+          <td class="small">{{ n.created_by or '-' }}</td>
+          <td>
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" {% if n.is_active %}checked{% endif %}
+                     onchange="toggleNotice({{ n.id }}, this.checked)">
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted">공지 없음</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+async function post(url, body){
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF}, body: JSON.stringify(body||{})});
+  return r.json();
+}
+async function broadcast(){
+  const msg = document.getElementById('bcMsg').value.trim();
+  if(!msg){ alert('메시지를 입력하세요'); return; }
+  const res = await post('/admin-saas/api/broadcast', {
+    message: msg, type: document.getElementById('bcType').value,
+    minutes: parseInt(document.getElementById('bcMin').value)||30,
+  });
+  const el = document.getElementById('bcResult');
+  if(res.ok){ el.textContent='✓ 전송됨'; el.className='small mt-2 text-success'; setTimeout(()=>location.reload(),800); }
+  else { el.textContent='✗ '+(res.error||'실패'); el.className='small mt-2 text-danger'; }
+}
+async function createNotice(){
+  const title = document.getElementById('ncTitle').value.trim();
+  if(!title){ alert('제목을 입력하세요'); return; }
+  const s = document.getElementById('ncStart').value, e = document.getElementById('ncEnd').value;
+  const res = await post('/admin-saas/api/notices', {
+    title, body: document.getElementById('ncBody').value, type: document.getElementById('ncType').value,
+    starts_at: s ? s+':00' : null, ends_at: e ? e+':00' : null,
+  });
+  const el = document.getElementById('ncResult');
+  if(res.ok){ el.textContent='✓ 생성됨'; el.className='small mt-2 text-success'; setTimeout(()=>location.reload(),800); }
+  else { el.textContent='✗ '+(res.error||'실패'); el.className='small mt-2 text-danger'; }
+}
+async function toggleNotice(id, active){
+  const res = await post(`/admin-saas/api/notices/${id}/toggle`, {is_active: active});
+  if(!res.ok) alert('변경 실패: '+(res.error||''));
+}
+</script>
+{% endblock %}

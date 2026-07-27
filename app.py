@@ -247,9 +247,39 @@ def create_app():
         })
 
     # ─── 템플릿 전역 컨텍스트 ───
+    def _get_active_notices():
+        """활성 시스템 공지 (전역) — 60초 프로세스 캐시. 배너용.
+        조건: is_active AND now BETWEEN starts_at AND ends_at (null=무제한)."""
+        import time as _time
+        from datetime import datetime, timezone
+        cache = getattr(app, '_notice_cache', None)
+        now = _time.time()
+        if cache and (now - cache[0] < 60):
+            return cache[1]
+        notices = []
+        try:
+            from db.client import get_admin_client
+            rows = get_admin_client().table('system_notices').select('*') \
+                .eq('is_active', True).order('created_at', desc=True).limit(10).execute().data or []
+            now_dt = datetime.now(timezone.utc)
+            for r in rows:
+                s, e = r.get('starts_at'), r.get('ends_at')
+                try:
+                    if s and datetime.fromisoformat(str(s).replace('Z', '+00:00')) > now_dt:
+                        continue
+                    if e and datetime.fromisoformat(str(e).replace('Z', '+00:00')) < now_dt:
+                        continue
+                except Exception:
+                    pass
+                notices.append(r)
+        except Exception:
+            notices = []
+        app._notice_cache = (now, notices)
+        return notices
+
     @app.context_processor
     def inject_globals():
-        """모든 템플릿에 current_biz, g 등 주입."""
+        """모든 템플릿에 current_biz, active_notices 등 주입."""
         from flask import g as _g
         biz = None
         if hasattr(_g, 'biz_id') and _g.biz_id:
@@ -257,7 +287,10 @@ def create_app():
                 'id': _g.biz_id,
                 'name': getattr(_g, 'biz_name', None) or str(_g.biz_id),
             })()
-        return dict(current_biz=biz)
+        notices = []
+        if current_user.is_authenticated:
+            notices = _get_active_notices()
+        return dict(current_biz=biz, active_notices=notices)
 
     # ─── MarketplaceManager 클래스 사전 임포트 (before_request에서 빠르게 사용) ───
     try:

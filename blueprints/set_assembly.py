@@ -10,9 +10,38 @@ from services.tz_utils import today_kst
 import pandas as pd
 from flask import (
     Blueprint, render_template, request, current_app,
-    flash, redirect, url_for, send_file, jsonify,
+    flash, redirect, url_for, send_file, jsonify, g,
 )
 from flask_login import login_required, current_user
+
+
+def _resolve_set_batch(db, anchor):
+    """세트작업 1건에 속한 모든 active 행(SET_IN + SET_OUT)을 찾는다.
+
+    - set_batch_id 있으면(신규 작업): 그 키로 묶인 전 행.
+    - 없으면(레거시): 같은 (created_at, location) 의 SET_IN/SET_OUT 전 행.
+    ※ raw 쿼리 → biz_id 명시 필터(service_role이 RLS 우회하므로 테넌트 격리 필수).
+    """
+    biz_id = g.biz_id
+    batch_id = anchor.get('set_batch_id')
+    if batch_id:
+        rows = db.client.table('stock_ledger').select('*') \
+            .eq('biz_id', biz_id).eq('set_batch_id', batch_id) \
+            .or_('status.is.null,status.eq.active') \
+            .execute().data or []
+        return rows
+    # 레거시 폴백: created_at + location
+    ca = anchor.get('created_at')
+    loc = anchor.get('location')
+    if not ca:
+        return [anchor]
+    q = db.client.table('stock_ledger').select('*') \
+        .eq('biz_id', biz_id).eq('created_at', ca) \
+        .in_('type', ['SET_IN', 'SET_OUT']) \
+        .or_('status.is.null,status.eq.active')
+    if loc is not None:
+        q = q.eq('location', loc)
+    return q.execute().data or []
 
 from auth import role_required, _log_action
 from models import INV_TYPE_LABELS
@@ -166,6 +195,94 @@ def process():
         flash(f'세트작업 처리 중 오류: {e}', 'danger')
 
     return redirect(url_for('set_assembly.index'))
+
+
+@set_assembly_bp.route('/api/delete/<int:record_id>', methods=['POST'])
+@role_required('admin', 'manager', 'production')
+def api_delete(record_id):
+    """세트작업 '단위' 취소 — 클릭한 행이 속한 세트작업 전체를 블라인드.
+    배치키(또는 created_at)로 묶인 전 행을 함께 블라인드 → 세트 제거 +
+    구성품 재고 복원(분해 복구)."""
+    db = get_db()
+    try:
+        anchor = db.query_stock_ledger_by_id(record_id)
+        if not anchor:
+            return jsonify({'error': '레코드를 찾을 수 없습니다.'}), 404
+        if anchor.get('type') not in ('SET_OUT', 'SET_IN'):
+            return jsonify({'error': '세트작업 이력이 아닙니다.'}), 400
+
+        batch_rows = _resolve_set_batch(db, anchor)
+        blinded = 0
+        for r in batch_rows:
+            rid = r.get('id')
+            if rid:
+                db.blind_stock_ledger(rid, blinded_by=current_user.username)
+                blinded += 1
+
+        set_in = next((r for r in batch_rows if r.get('type') == 'SET_IN'), None)
+        set_name = (set_in or anchor).get('product_name', '')
+        _log_action('cancel_set_assembly', target=str(record_id),
+                     old_value=batch_rows,
+                     detail=f'세트작업 단위 취소: {set_name} — {blinded}행 블라인드(분해 복구)')
+        return jsonify({
+            'success': True,
+            'blinded': blinded,
+            'set_name': set_name,
+            'component_count': sum(1 for r in batch_rows if r.get('type') == 'SET_OUT'),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@set_assembly_bp.route('/api/update/<int:record_id>', methods=['POST'])
+@role_required('admin', 'manager', 'production')
+def api_update(record_id):
+    """세트작업 이력 1행 수정. 원본 블라인드 + 새 행 INSERT."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({'error': '수정 데이터가 없습니다.'}), 400
+
+    allowed = {'product_name', 'qty', 'location', 'category', 'unit',
+               'storage_method', 'memo'}
+    update_data = {k: v for k, v in data.items() if k in allowed}
+    if 'qty' in update_data:
+        try:
+            update_data['qty'] = float(update_data['qty'])
+            if update_data['qty'] == int(update_data['qty']):
+                update_data['qty'] = int(update_data['qty'])
+        except (ValueError, TypeError):
+            return jsonify({'error': '수량이 올바르지 않습니다.'}), 400
+    if not update_data:
+        return jsonify({'error': '수정할 항목이 없습니다.'}), 400
+
+    original = get_db().query_stock_ledger_by_id(record_id)
+    if not original:
+        return jsonify({'error': '레코드를 찾을 수 없습니다.'}), 404
+    if original.get('type') not in ('SET_OUT', 'SET_IN'):
+        return jsonify({'error': '세트작업 이력이 아닙니다.'}), 400
+
+    # 부호 보정: SET_OUT(차감)은 음수, SET_IN(산출)은 양수 유지
+    if 'qty' in update_data:
+        q = abs(update_data['qty'])
+        update_data['qty'] = -q if original.get('type') == 'SET_OUT' else q
+
+    skip_fields = {'id', 'status', 'replaced_by', 'replaces',
+                   'created_at', 'updated_at', 'updated_by', 'created_by',
+                   'is_deleted', 'deleted_at', 'deleted_by'}
+    new_payload = {k: v for k, v in original.items() if k not in skip_fields}
+    new_payload.update(update_data)
+
+    try:
+        new_id = get_db().replace_stock_ledger(
+            record_id, new_payload, replaced_by_user=current_user.username)
+        _log_action('replace_set_assembly_row', target=str(record_id),
+                     old_value={k: original.get(k) for k in update_data},
+                     new_value=update_data)
+        return jsonify({'success': True, 'new_id': new_id})
+    except Exception as e:
+        _log_action('replace_set_assembly_error', target=str(record_id),
+                     detail=f'세트작업 수정 오류: {str(e)}', new_value=update_data)
+        return jsonify({'error': str(e)}), 500
 
 
 @set_assembly_bp.route('/delete', methods=['POST'])

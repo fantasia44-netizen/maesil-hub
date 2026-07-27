@@ -36,6 +36,77 @@ def index():
                            today=today_kst())
 
 
+# ── 무인 자동화 제어 (자동수집/자동채번 ON·OFF + 상태) ──
+#   ★ hub 멀티테넌트판: app_settings 를 현재 테넌트(g.biz_id) 스코프로 조회/저장.
+#     get/set_app_setting 은 (biz_id,key) PK 이고, 요청 컨텍스트에서는 tenant_guard 가
+#     g.biz_id 를 자동주입하므로 별도 biz_id 인자 없이 호출한다.
+
+_AUTO_KEYS = {
+    'collect': ('auto_collect_enabled', 'auto_collect_last_run', True),
+    'cj':      ('auto_cj_enabled',      'auto_cj_last_run',      False),
+}
+
+
+@shipping_bp.route('/api/auto-status', methods=['GET'])
+@role_required('admin', 'manager', 'general')
+def auto_status():
+    """자동수집/자동채번 토글 상태 + 마지막 실행 이력 (현재 테넌트)."""
+    db = get_db()
+    out = {}
+    for name, (flag_key, run_key, default_on) in _AUTO_KEYS.items():
+        flag = db.get_app_setting(flag_key, {'on': default_on})
+        last = db.get_app_setting(run_key, {}) or {}
+        out[name] = {
+            'on': bool(flag.get('on', default_on)) if isinstance(flag, dict) else bool(flag),
+            'last_run': last,
+        }
+    return jsonify(out)
+
+
+@shipping_bp.route('/api/auto-toggle', methods=['POST'])
+@role_required('admin', 'general')
+def auto_toggle():
+    """자동수집/자동채번 ON·OFF 토글 (현재 테넌트)."""
+    db = get_db()
+    target = request.form.get('target', '')
+    on = request.form.get('on', 'false').lower() == 'true'
+    if target not in _AUTO_KEYS:
+        return jsonify({'error': 'target must be collect|cj'}), 400
+    flag_key = _AUTO_KEYS[target][0]
+    db.set_app_setting(flag_key, {'on': on}, updated_by=current_user.username)
+    _log_action(f'자동화 토글: {target} → {"ON" if on else "OFF"}')
+    return jsonify({'target': target, 'on': on})
+
+
+@shipping_bp.route('/api/auto-run-now', methods=['POST'])
+@role_required('admin', 'general')
+def auto_run_now():
+    """자동수집/자동채번 즉시 1회 실행 (백그라운드, 토글 OFF 여도 강제, 현재 테넌트만)."""
+    import threading
+    from flask import current_app
+    from services.auto_pipeline import run_order_collection, run_cj_invoicing
+
+    target = request.form.get('target', 'collect')
+    if target not in _AUTO_KEYS:
+        return jsonify({'error': 'target must be collect|cj'}), 400
+    appobj = current_app._get_current_object()
+    # ★ 백그라운드 스레드는 요청 컨텍스트를 잃으므로 현재 테넌트 biz_id 를 캡처해 명시 전달.
+    biz_id = getattr(g, 'biz_id', None)
+
+    def _bg():
+        try:
+            if target == 'cj':
+                run_cj_invoicing(appobj, force=True, biz_id=biz_id)
+            else:
+                run_order_collection(appobj, force=True, biz_id=biz_id)
+        except Exception as e:
+            logger.error(f'[AutoRunNow] {target} 오류: {e}', exc_info=True)
+
+    threading.Thread(target=_bg, daemon=True, name=f'auto-run-{target}').start()
+    _log_action(f'자동화 즉시실행: {target}')
+    return jsonify({'started': True, 'target': target})
+
+
 # ── CJ 송장 업로드 (엑셀 매칭) ──
 
 @shipping_bp.route('/api/cj-tracking-upload', methods=['POST'])

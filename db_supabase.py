@@ -1754,6 +1754,8 @@ class SupabaseDB(DBBase):
                 '라인코드': r.get('line_code', '0'),
                 '출력순서': float(r.get('sort_order', 999)),
                 '바코드': r.get('barcode', ''),
+                # 증정옵션 배수(1+1=2) — 출고수량·재고차감에만 적용, 매출은 주문수량 기준
+                '수량배수': int(r.get('qty_multiplier') or 1),
                 'Key': r.get('match_key', ''),
             })
         self._option_cache['data_list'] = result
@@ -3386,6 +3388,39 @@ class SupabaseDB(DBBase):
         except Exception as e:
             print(f"[DB] query_bom_master_all error: {e}")
             return []
+
+    def upsert_bom_master(self, channel, set_name, components, *, biz_id=None):
+        """BOM 마스터 등록/수정. components: '품목x수량,품목x수량' 형식 문자열.
+        ★존재확인/insert에 biz_id 포함 — 누락 시 타 테넌트 BOM 덮어쓰기."""
+        biz_id = self._resolve_biz_id(biz_id)
+        try:
+            q = self.client.table("bom_master").select("id") \
+                .eq("channel", channel).eq("set_name", set_name)
+            existing = self._with_biz(q, biz_id).limit(1).execute()
+            if existing.data:
+                uq = self.client.table("bom_master").update({"components": components}) \
+                    .eq("channel", channel).eq("set_name", set_name)
+                self._with_biz(uq, biz_id).execute()
+            else:
+                self.client.table("bom_master").insert(self._inject_biz_id({
+                    "channel": channel,
+                    "set_name": set_name,
+                    "components": components,
+                }, biz_id)).execute()
+        except Exception as e:
+            print(f"[DB] upsert_bom_master error: {e}")
+            raise
+
+    def delete_bom_master(self, channel, set_name, *, biz_id=None):
+        """BOM 마스터 삭제. biz_id 필터로 자기 테넌트 것만 삭제."""
+        biz_id = self._resolve_biz_id(biz_id)
+        try:
+            dq = self.client.table("bom_master").delete() \
+                .eq("channel", channel).eq("set_name", set_name)
+            self._with_biz(dq, biz_id).execute()
+        except Exception as e:
+            print(f"[DB] delete_bom_master error: {e}")
+            raise
 
     # ================================================================
     # 실시간 주문처리: 추가 메서드
@@ -5991,6 +6026,40 @@ class SupabaseDB(DBBase):
             ).execute()
         except Exception as e:
             print(f"[DB] upsert_marketplace_api_config error: {e}")
+
+    # ── app_settings (테넌트별 무인 자동화 토글/이력) ──
+
+    def get_app_setting(self, key, default=None, *, biz_id=None):
+        """app_settings 값 조회(테넌트별). Returns: value(dict) 또는 default."""
+        biz_id = self._resolve_biz_id(biz_id)
+        try:
+            q = self.client.table("app_settings").select("value").eq("key", key)
+            res = self._with_biz(q, biz_id).limit(1).execute()
+            if res.data:
+                return res.data[0].get("value", default)
+            return default
+        except Exception as e:
+            print(f"[DB] get_app_setting({key}) error: {e}")
+            return default
+
+    def set_app_setting(self, key, value, updated_by="", *, biz_id=None):
+        """app_settings 값 upsert(테넌트별, on_conflict=(biz_id,key))."""
+        biz_id = self._resolve_biz_id(biz_id)
+        try:
+            from datetime import datetime, timezone
+            payload = {
+                "biz_id": biz_id,
+                "key": key,
+                "value": value,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_by": updated_by,
+            }
+            self.client.table("app_settings").upsert(
+                payload, on_conflict="biz_id,key").execute()
+            return True
+        except Exception as e:
+            print(f"[DB] set_app_setting({key}) error: {e}")
+            return False
 
     # ── api_sync_log ──
 

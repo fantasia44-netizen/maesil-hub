@@ -9,7 +9,7 @@ from services.tz_utils import today_kst
 import pandas as pd
 from flask import (
     Blueprint, render_template, request, current_app,
-    flash, redirect, url_for, jsonify,
+    flash, redirect, url_for, jsonify, g,
 )
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
@@ -60,17 +60,31 @@ def api_history():
     prod_filter = (request.args.get('product') or '').strip()
     limit = int(request.args.get('limit', 200))
 
+    biz_id = g.biz_id
     try:
-        q = db.client.table('stock_ledger').select(
-            'id,transaction_date,type,product_name,qty,location,'
-            'transfer_id,manufacture_date,lot_number,grade,'
-            'created_by,created_at,status,unit'
-        ).in_('type', ['MOVE_OUT', 'MOVE_IN']) \
-         .gte('transaction_date', date_from) \
-         .lte('transaction_date', date_to) \
-         .or_('status.is.null,status.eq.active') \
-         .order('id', desc=True).limit(2000)
-        rows = q.execute().data or []
+        # 범위 내 전체 MOVE 행을 페이지네이션으로 조회.
+        # ※ 단일 .limit(2000)은 Supabase max_rows(=1000)에 잘려 최신 1000행만
+        #   반환됨 → 범위 내 이동이 1000건 넘으면 오래된 이동이 이력에서 통째로
+        #   누락되는 버그(total에서 규명). range() 루프로 전량 확보.
+        # + biz_id 필터: 앱이 service_role로 접속해 RLS가 우회되므로 테넌트 격리를
+        #   명시적으로 걸어야 함(누락 시 전 테넌트 이동이력 노출).
+        rows = []
+        _off = 0
+        while True:
+            _b = db.client.table('stock_ledger').select(
+                'id,transaction_date,type,product_name,qty,location,'
+                'transfer_id,manufacture_date,lot_number,grade,'
+                'created_by,created_at,status,unit'
+            ).eq('biz_id', biz_id) \
+             .in_('type', ['MOVE_OUT', 'MOVE_IN']) \
+             .gte('transaction_date', date_from) \
+             .lte('transaction_date', date_to) \
+             .or_('status.is.null,status.eq.active') \
+             .order('id', desc=True).range(_off, _off + 999).execute().data or []
+            rows.extend(_b)
+            if len(_b) < 1000:
+                break
+            _off += 1000
 
         # transfer_id 그룹핑
         groups = defaultdict(lambda: {'out_rows': [], 'in_rows': []})
@@ -235,23 +249,57 @@ def api_products():
     if not location:
         return jsonify([])
     try:
-        from services.excel_io import build_stock_snapshot
-        all_data = get_db().query_stock_by_location(location)
-        snapshot = build_stock_snapshot(all_data)
-        products = []
-        for name, info in snapshot.items():
-            if info['total'] > 0:
-                mfg_dates = sorted(set(
-                    str(g.get('manufacture_date', '')).strip()
-                    for g in info.get('groups', [])
-                    if g.get('qty', 0) > 0 and str(g.get('manufacture_date', '')).strip()
-                ))
-                products.append({
-                    'name': name,
-                    'qty': info['total'],
-                    'unit': info.get('unit', '개'),
-                    'mfg_dates': mfg_dates,
-                })
+        products = None
+        # ── RPC 우선: 서버 GROUP BY 1회 왕복 (행 풀스캔은 큰 창고 20초+, total 22.8s 사고).
+        #    hub RPC는 (DATE,TEXT,BIGINT) — p_biz_id로 테넌트 격리 ──
+        rpc_params = {'p_date_to': today_kst(), 'p_split_mode': 'manufacture'}
+        if getattr(g, 'biz_id', None):
+            rpc_params['p_biz_id'] = g.biz_id
+        try:
+            res = get_db().client.rpc('get_stock_snapshot_agg', rpc_params).execute()
+            rpc_rows = res.data if isinstance(res.data, list) else None
+        except Exception as _rpc_err:
+            print(f"[transfer.api_products] RPC 폴백: {_rpc_err}")
+            rpc_rows = None
+        if rpc_rows is not None:
+            agg = {}
+            for r in rpc_rows:
+                if (r.get('location') or '') != location:
+                    continue
+                name = r.get('product_name') or ''
+                if not name:
+                    continue
+                q = float(r.get('qty') or 0)
+                a = agg.setdefault(name, {'qty': 0.0, 'unit': r.get('unit') or '개',
+                                          'mfg': set()})
+                a['qty'] += q
+                mfg = (r.get('manufacture_date') or '').strip()
+                if q > 0 and mfg:
+                    a['mfg'].add(mfg)
+            products = [
+                {'name': n, 'qty': a['qty'], 'unit': a['unit'],
+                 'mfg_dates': sorted(a['mfg'])}
+                for n, a in agg.items() if a['qty'] > 0
+            ]
+        # ── 폴백: 행 스캔 (RPC 실패 시) ──
+        if products is None:
+            from services.excel_io import build_stock_snapshot
+            all_data = get_db().query_stock_by_location(location)
+            snapshot = build_stock_snapshot(all_data)
+            products = []
+            for name, info in snapshot.items():
+                if info['total'] > 0:
+                    mfg_dates = sorted(set(
+                        str(grp.get('manufacture_date', '')).strip()
+                        for grp in info.get('groups', [])
+                        if grp.get('qty', 0) > 0 and str(grp.get('manufacture_date', '')).strip()
+                    ))
+                    products.append({
+                        'name': name,
+                        'qty': info['total'],
+                        'unit': info.get('unit', '개'),
+                        'mfg_dates': mfg_dates,
+                    })
         products.sort(key=lambda x: x['name'])
         return jsonify(products)
     except Exception as e:

@@ -347,14 +347,25 @@ def api_option_register():
     if not original_name or not product_name:
         return jsonify({'error': '원문명과 품목명은 필수입니다.'}), 400
 
+    payload = {
+        'original_name': original_name,
+        'product_name': product_name,
+        'line_code': line_code,
+        'sort_order': sort_order,
+        'barcode': barcode,
+    }
+    # 증정옵션 배수(1+1=2)는 호출부가 명시 전송한 경우에만 포함.
+    # insert_option_master가 upsert(on_conflict=(biz_id,match_key))라, 항상 넣으면
+    # 주문처리 팝업(배수 미전송) 재등록 시 기존 배수가 1로 덮어써짐.
+    if 'qty_multiplier' in data:
+        try:
+            _m = int(data.get('qty_multiplier') or 1)
+        except (TypeError, ValueError):
+            _m = 1
+        payload['qty_multiplier'] = max(_m, 1)
+
     try:
-        get_db().insert_option_master({
-            'original_name': original_name,
-            'product_name': product_name,
-            'line_code': line_code,
-            'sort_order': sort_order,
-            'barcode': barcode,
-        })
+        get_db().insert_option_master(payload)
         # 등록 성공 후 캐시 강제 갱신 (재처리 대비)
         match_key = original_name.replace(' ', '').upper()
         print(f"[OPTION-REG] OK: '{original_name}' -> '{product_name}' match_key='{match_key}'")
@@ -1616,6 +1627,109 @@ def api_rocket_add_product():
         return jsonify({'success': False, 'error': err_str})
 
 
+@orders_bp.route('/api/rocket-products', methods=['GET'])
+@role_required('admin', 'manager', 'sales')
+def api_rocket_products_list():
+    """로켓상품 목록 — master_prices.로켓판매가>0 기준(로켓매출 드롭다운과 동일 소스).
+    products에 없는 이름은 phantom(유령)으로 표시 → 잘못된 이름 식별.
+    ※ products/master_prices는 hub RLS 대상 밖 — 기존 api_rocket_add_product와
+      동일 스타일(테넌트 격리는 hub 전역 미결과제)."""
+    db = get_db()
+    try:
+        mp = db.client.table('master_prices').select('품목명,로켓판매가') \
+            .gt('로켓판매가', 0).execute().data or []
+        prods = db.client.table('products').select('product_name') \
+            .range(0, 9999).execute().data or []
+        pset = {(p.get('product_name') or '').replace(' ', '') for p in prods}
+        items = []
+        for r in mp:
+            nm = r.get('품목명', '') or ''
+            items.append({
+                'product_name': nm,
+                'rocket_price': r.get('로켓판매가', 0) or 0,
+                'in_products': nm.replace(' ', '') in pset,
+            })
+        items.sort(key=lambda x: (not x['in_products'], x['product_name']))  # 유령 먼저
+        return jsonify({'ok': True, 'data': items})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+
+
+@orders_bp.route('/api/rocket-products/update', methods=['POST'])
+@role_required('admin', 'manager')
+def api_rocket_products_update():
+    """로켓상품 가격수정 + 이름정정 — master_prices + products 동기화.
+    이름 변경 시 유령이름(사과1단2p)을 올바른 상품명(사과2p)으로 교정 가능."""
+    db = get_db()
+    data = request.get_json() or {}
+    orig = (data.get('orig_name') or '').strip()
+    new_name = (data.get('product_name') or '').strip()
+    try:
+        price = float(data.get('rocket_price') or 0)
+    except (TypeError, ValueError):
+        price = 0
+    if not orig or not new_name:
+        return jsonify({'ok': False, 'error': '상품명이 비어있습니다.'})
+    if price <= 0:
+        return jsonify({'ok': False, 'error': '로켓판매가는 0보다 커야 합니다.'})
+    try:
+        # 이름 변경 시 대상명 중복 검사
+        if new_name != orig:
+            dup = db.client.table('master_prices').select('id') \
+                .eq('품목명', new_name).execute().data or []
+            if dup:
+                return jsonify({'ok': False, 'error': f'이미 존재하는 이름입니다: {new_name}'})
+        # master_prices 반영 (이름/가격)
+        upd = {'로켓판매가': price}
+        if new_name != orig:
+            upd['품목명'] = new_name
+        db.client.table('master_prices').update(upd).eq('품목명', orig).execute()
+        # products.rocket_price 동기화 (새 이름에 상품이 있으면)
+        if db.client.table('products').select('product_name') \
+                .eq('product_name', new_name).execute().data:
+            db.client.table('products').update({'rocket_price': price}) \
+                .eq('product_name', new_name).execute()
+        # 이름이 바뀌었고 옛 이름이 products에 있으면 옛 로켓가 해제
+        if new_name != orig and db.client.table('products').select('product_name') \
+                .eq('product_name', orig).execute().data:
+            db.client.table('products').update({'rocket_price': 0}) \
+                .eq('product_name', orig).execute()
+        try:
+            db._invalidate_price_cache()
+        except Exception:
+            pass
+        _log_action('rocket_product_update',
+                    detail=f'로켓상품 {orig} → {new_name} / {price:,.0f}원')
+        return jsonify({'ok': True, 'message': f'"{new_name}" 로켓판매가 {price:,.0f}원 반영'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+
+
+@orders_bp.route('/api/rocket-products/remove', methods=['POST'])
+@role_required('admin', 'manager')
+def api_rocket_products_remove():
+    """로켓상품에서 제외 — master_prices 로켓판매가=0 + products.rocket_price=0.
+    (드롭다운에서 사라짐. 행 자체는 다른 채널가 보존 위해 유지)"""
+    db = get_db()
+    data = request.get_json() or {}
+    name = (data.get('product_name') or '').strip()
+    if not name:
+        return jsonify({'ok': False, 'error': '상품명이 비어있습니다.'})
+    try:
+        db.client.table('master_prices').update({'로켓판매가': 0}) \
+            .eq('품목명', name).execute()
+        db.client.table('products').update({'rocket_price': 0}) \
+            .eq('product_name', name).execute()
+        try:
+            db._invalidate_price_cache()
+        except Exception:
+            pass
+        _log_action('rocket_product_remove', detail=f'로켓상품 제외: {name}')
+        return jsonify({'ok': True, 'message': f'"{name}" 로켓상품에서 제외됨'})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)})
+
+
 @orders_bp.route('/api/rocket-manual/<int:rev_id>', methods=['PUT'])
 @role_required('admin', 'manager')
 def api_rocket_manual_update(rev_id):
@@ -2111,11 +2225,22 @@ def api_options_update(option_id):
     """옵션 수정 (삭제 불가) — products 동기화 포함"""
     db = get_db()
     data = request.get_json()
-    allowed_fields = ['product_name', 'line_code', 'sort_order', 'barcode']
+    allowed_fields = ['product_name', 'line_code', 'sort_order', 'barcode',
+                      'qty_multiplier']
     update = {k: data[k] for k in allowed_fields if k in data}
 
     if not update:
         return jsonify({'ok': False, 'error': '수정할 항목이 없습니다.'})
+
+    # 수량배수: 1 이상 정수만 (DB CHECK 위반 방지)
+    if 'qty_multiplier' in update:
+        try:
+            _m = int(update['qty_multiplier'] or 1)
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'error': '수량배수는 숫자여야 합니다.'})
+        if _m < 1:
+            return jsonify({'ok': False, 'error': '수량배수는 1 이상이어야 합니다.'})
+        update['qty_multiplier'] = _m
 
     try:
         db.update_option_master(option_id, update)

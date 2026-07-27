@@ -372,3 +372,144 @@ def merge_orders(own_rows, maesil_rows):
     # 동일 operator가 두 DB에 동일 주문을 가지면 중복되지만
     # 현재 구조상 API 주문은 maesil DB에만 있으므로 중복 없음
     return own_rows + maesil_rows
+
+
+def get_maesil_settlements_raw_by_month(maesil_sb, operator_id, year_month):
+    """get_settlement_summary_by_month RPC — 원본 채널명 유지 (쿠팡 미병합).
+
+    get_maesil_settlements_by_month 와 달리 쿠팡_배마마 / 쿠팡_배마마_1P 를 합치지 않고
+    원본 채널명 그대로 반환. 매출관리 정산화면에서 쿠팡/쿠팡로켓 분리 표시용.
+
+    Returns:
+        list[dict] — RPC 원본 row (channel, gross_sales, total_commission,
+                     coupon_discount, point_discount, other_deductions, net_settlement)
+    """
+    if not maesil_sb or not operator_id:
+        return []
+    try:
+        res = maesil_sb.rpc('get_settlement_summary_by_month', {
+            'p_operator_id': operator_id,
+            'p_year_month': year_month,
+        }).execute()
+        return res.data or []
+    except Exception as e:
+        logger.warning(f'[Maesil Bridge] raw settlements 조회 실패: {e}')
+        return []
+
+
+def get_maesil_order_revenue_by_month(maesil_sb, operator_id, year_month):
+    """get_daily_trend RPC → 채널별 결제(주문) 매출·수수료. insight 대시보드 기준.
+
+    매출 = 결제금액(취소 포함), 수수료 = 결제기준 수수료. 둘 다 결제일 기준이라
+    순정산을 매출에서 파생(매출−취소−수수료−차감)할 수 있어 정산일 이월문제 제거.
+    ※ 쿠팡 1P(로켓)은 get_daily_trend 미포함 → 호출측에서 정산값 fallback.
+
+    Returns:
+        dict — {원본채널명: {'revenue': int, 'commission': int}}
+    """
+    from collections import defaultdict
+    import calendar
+    if not maesil_sb or not operator_id:
+        return {}
+    y, m = int(year_month[:4]), int(year_month[5:7])
+    df = f'{year_month}-01'
+    dt = f'{year_month}-{calendar.monthrange(y, m)[1]:02d}'
+    agg = defaultdict(lambda: {'revenue': 0, 'commission': 0})
+    try:
+        r = maesil_sb.rpc('get_daily_trend', {
+            'p_operator_id': operator_id,
+            'p_date_from': df, 'p_date_to': dt,
+        }).execute()
+        for x in (r.data or []):
+            c = (x.get('channel') or '').strip()
+            agg[c]['revenue'] += int(x.get('revenue') or 0)
+            agg[c]['commission'] += int(x.get('commission') or 0)
+    except Exception as e:
+        logger.warning(f'[Maesil Bridge] get_daily_trend(주문매출) 실패: {e}')
+    return {k: dict(v) for k, v in agg.items()}
+
+
+def get_maesil_cancel_by_month(maesil_sb, operator_id, year_month):
+    """api_orders CANCELED 결제금액·수수료 → 채널별 취소 (결제일 기준).
+
+    insight 결제일 정산 공식의 '취소' 항목. 매출(결제,취소포함)에서 취소 빼고,
+    수수료도 취소분 수수료를 빼야 순정산이 insight와 일치(취소주문엔 수수료 미발생).
+
+    Returns:
+        dict — {원본채널명: {'revenue': 취소액, 'commission': 취소수수료}}
+    """
+    from collections import defaultdict
+    import calendar
+    if not maesil_sb or not operator_id:
+        return {}
+    y, m = int(year_month[:4]), int(year_month[5:7])
+    df = f'{year_month}-01'
+    dt = f'{year_month}-{calendar.monthrange(y, m)[1]:02d}'
+    canc = defaultdict(lambda: {'revenue': 0, 'commission': 0})
+    try:
+        off = 0
+        while True:
+            r = maesil_sb.table('api_orders').select('channel,total_amount,commission') \
+                .eq('operator_id', operator_id).eq('order_status', 'CANCELED') \
+                .gte('order_date', df).lte('order_date', dt) \
+                .range(off, off + 999).execute()
+            rows = r.data or []
+            for x in rows:
+                c = (x.get('channel') or '').strip()
+                canc[c]['revenue'] += int(x.get('total_amount') or 0)
+                canc[c]['commission'] += int(x.get('commission') or 0)
+            if len(rows) < 1000:
+                break
+            off += 1000
+    except Exception as e:
+        logger.warning(f'[Maesil Bridge] api_orders 취소 조회 실패: {e}')
+    return {k: dict(v) for k, v in canc.items()}
+
+
+def get_maesil_ad_cost_by_month(maesil_sb, operator_id, year_month):
+    """네이버/쿠팡 일별 광고비 → maesil-total 채널명 기준 집계.
+
+    소스: naver_ad_spend_daily(channel) + coupang_ad_spend_daily(campaign_name).
+    관리손익표 광고비와 동일 (검증: 2026-06 = 9,985,773).
+
+    채널 매핑:
+      네이버 '해미애찬*'  → 스마트스토어_해미애찬,  그 외 → 스마트스토어_배마마
+      쿠팡   '1P*' 캠페인 → 쿠팡로켓,             그 외 → 쿠팡
+
+    Returns:
+        dict — {채널명: 광고비(int)}
+    """
+    from collections import defaultdict
+    import calendar
+    if not maesil_sb or not operator_id:
+        return {}
+    y, m = int(year_month[:4]), int(year_month[5:7])
+    date_from = f'{year_month}-01'
+    date_to = f'{year_month}-{calendar.monthrange(y, m)[1]:02d}'
+    ad = defaultdict(int)
+
+    def _sum(table, classify):
+        # 두 테이블 모두 channel 컬럼 없음 — campaign_name 으로 채널 분류
+        off = 0
+        while True:
+            try:
+                r = maesil_sb.table(table).select('campaign_name,cost') \
+                    .eq('operator_id', operator_id) \
+                    .gte('date', date_from).lte('date', date_to) \
+                    .range(off, off + 999).execute()
+            except Exception as e:
+                logger.warning(f'[Maesil Bridge] {table} 광고비 조회 실패: {e}')
+                return
+            rows = r.data or []
+            for x in rows:
+                ad[classify(x.get('campaign_name') or '')] += int(x.get('cost') or 0)
+            if len(rows) < 1000:
+                break
+            off += 1000
+
+    _sum('naver_ad_spend_daily',
+         lambda camp: '스마트스토어_해미애찬' if '해미애찬' in camp
+                      else '스마트스토어_배마마')
+    _sum('coupang_ad_spend_daily',
+         lambda camp: '쿠팡로켓' if '1P' in camp.upper() else '쿠팡')
+    return dict(ad)

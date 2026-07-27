@@ -9,7 +9,16 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-box-arrow-in-down"></i> 입고 등록</span>
-                <span class="badge bg-primary" id="itemCountBadge">0건</span>
+                <span class="d-flex align-items-center gap-2">
+                    <a href="{{ url_for('inbound.excel_template') }}" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-download"></i> 엑셀양식
+                    </a>
+                    <button type="button" class="btn btn-outline-success btn-sm" id="excelUploadBtn">
+                        <i class="bi bi-file-earmark-excel"></i> 엑셀 일괄등록
+                    </button>
+                    <input type="file" id="excelFileInput" accept=".xlsx,.xls" style="display:none">
+                    <span class="badge bg-primary" id="itemCountBadge">0건</span>
+                </span>
             </div>
             <div class="card-body">
                 <!-- 기준일 -->
@@ -259,6 +268,35 @@
     </div>
 </div>
 {% endif %}
+<!-- 엑셀 입고 미리보기 모달 -->
+<div class="modal fade" id="excelPreviewModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header py-2">
+                <h6 class="modal-title"><i class="bi bi-file-earmark-excel"></i> 엑셀 입고 미리보기</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="excelPreviewSummary" class="mb-2"></div>
+                <div id="excelPreviewErrors" class="small text-danger mb-2"></div>
+                <div id="excelPreviewWarnings" class="small text-warning mb-2"></div>
+                <div class="table-responsive" style="max-height:50vh;">
+                    <table class="table table-sm table-bordered small mb-0">
+                        <thead class="table-light"><tr>
+                            <th>날짜</th><th>품목명</th><th>창고</th><th class="text-end">수량</th>
+                            <th>단위</th><th>카테고리</th><th>보관</th>
+                        </tr></thead>
+                        <tbody id="excelPreviewBody"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary btn-sm" id="excelApplyBtn" disabled>반영</button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -554,6 +592,71 @@
         return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
     renderTable();
+})();
+</script>
+<script>
+// ── 엑셀 일괄 입고: 업로드 → 미리보기 → 반영 ──
+(function(){
+    const csrf = '{{ csrf_token() }}';
+    const fileInput = document.getElementById('excelFileInput');
+    const uploadBtn = document.getElementById('excelUploadBtn');
+    const modalEl = document.getElementById('excelPreviewModal');
+    const applyBtn = document.getElementById('excelApplyBtn');
+    if(!fileInput || !uploadBtn || !modalEl) return;
+    let previewItems = [];
+
+    function esc(s){ return String(s==null?'':s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+    uploadBtn.addEventListener('click', ()=> fileInput.click());
+
+    fileInput.addEventListener('change', async function(){
+        const f = this.files[0]; if(!f) return;
+        const fd = new FormData(); fd.append('file', f);
+        try {
+            const res = await fetch('{{ url_for("inbound.excel_preview") }}',
+                {method:'POST', headers:{'X-CSRFToken':csrf}, body:fd});
+            const d = await res.json();
+            this.value='';
+            if(!d.ok){ alert(d.error||'미리보기 실패'); return; }
+            renderPreview(d);
+            bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        } catch(e){ this.value=''; alert('업로드 오류: '+e); }
+    });
+
+    function renderPreview(d){
+        previewItems = d.items || [];
+        const errs = d.errors||[], warns = d.warnings||[];
+        document.getElementById('excelPreviewSummary').innerHTML =
+            `<span class="badge bg-primary">유효 ${d.count}건</span> ` +
+            (errs.length? `<span class="badge bg-danger">오류 ${errs.length}</span> `:'') +
+            (warns.length? `<span class="badge bg-warning text-dark">경고 ${warns.length}</span>`:'');
+        document.getElementById('excelPreviewErrors').innerHTML = errs.map(e=>'• '+esc(e)).join('<br>');
+        document.getElementById('excelPreviewWarnings').innerHTML = warns.map(w=>'• '+esc(w)).join('<br>');
+        document.getElementById('excelPreviewBody').innerHTML = previewItems.map(it=>{
+            const nameIssue = (it.issues||[]).some(x=>x.field==='name');
+            const badge = nameIssue ? ' <span class="badge bg-warning text-dark">신규/오타?</span>' : '';
+            return `<tr><td>${esc(it.date)}</td><td>${esc(it.product_name)}${badge}</td><td>${esc(it.location)}</td>`+
+            `<td class="text-end">${it.qty}</td><td>${esc(it.unit||'')}</td>`+
+            `<td>${esc(it.category||'')}</td><td>${esc(it.storage_method||'')}</td></tr>`;
+        }).join('');
+        applyBtn.disabled = (previewItems.length===0) || (errs.length>0);
+        applyBtn.textContent = errs.length>0 ? '오류 수정 후 가능' : `${previewItems.length}건 반영`;
+    }
+
+    applyBtn.addEventListener('click', async function(){
+        if(!previewItems.length) return;
+        this.disabled=true; this.textContent='반영 중...';
+        try {
+            const res = await fetch('{{ url_for("inbound.excel_apply") }}',
+                {method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':csrf},
+                 body:JSON.stringify({items:previewItems})});
+            const d = await res.json();
+            if(!d.ok){ alert(d.error||'반영 실패'); this.disabled=false; this.textContent='반영'; return; }
+            bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+            alert(`입고 ${d.count}건 반영 완료`+((d.warnings&&d.warnings.length)?('\n\n경고:\n'+d.warnings.join('\n')):''));
+            location.reload();
+        } catch(e){ alert('반영 오류: '+e); this.disabled=false; this.textContent='반영'; }
+    });
 })();
 </script>
 {% endblock %}

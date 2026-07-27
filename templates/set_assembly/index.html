@@ -149,6 +149,7 @@
                                 <th class="text-end">수량</th>
                                 <th>창고</th>
                                 <th>비고</th>
+                                <th class="text-center">관리</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -169,10 +170,16 @@
                                 <td class="text-end">{{ row.qty|fmt_qty }}</td>
                                 <td>{{ row.location|default('-') }}</td>
                                 <td class="text-muted small">{{ row.memo|default('-') }}</td>
+                                <td class="text-center">
+                                    <button class="btn btn-outline-primary btn-sm py-0"
+                                        onclick="editSetRow({{ row.id }}, '{{ row.type }}', {{ row.qty }})">수정</button>
+                                    <button class="btn btn-outline-danger btn-sm py-0"
+                                        onclick="cancelSetRow({{ row.id }}, '{{ row.product_name|e }}')">단위취소</button>
+                                </td>
                             </tr>
                             {% else %}
                             <tr>
-                                <td colspan="6" class="text-center text-muted py-4">
+                                <td colspan="7" class="text-center text-muted py-4">
                                     {% if date_from or date_to %}
                                     해당 기간의 세트작업 이력이 없습니다.
                                     {% else %}
@@ -324,6 +331,36 @@ function addSubMaterialRow() {
 
 function removeSubRow(btn) {
     btn.closest('.sub-material-row').remove();
+}
+
+// ── 세트작업 이력 단위취소(분해복구) / 수정 ──
+const _SET_CSRF = "{{ csrf_token() }}";
+
+function cancelSetRow(id, name) {
+    if (!confirm(`"${name}" 세트작업을 단위취소할까요?\n` +
+                 `묶인 전 행(세트산출+구성품차감)을 되돌려 구성품 재고가 복원됩니다(분해 복구).`)) return;
+    fetch(`/set-assembly/api/delete/${id}`, {
+        method: 'POST', headers: {'X-CSRFToken': _SET_CSRF},
+    }).then(r => r.json()).then(d => {
+        if (d.success) { alert(`${d.set_name}: ${d.blinded}행 취소(분해 복구)`); location.reload(); }
+        else alert('실패: ' + (d.error || ''));
+    }).catch(e => alert('오류: ' + e.message));
+}
+
+function editSetRow(id, type, curQty) {
+    const q = prompt(`수량 수정 (${type === 'SET_OUT' ? '구성품 차감' : '세트 산출'})`,
+                     Math.abs(curQty));
+    if (q === null) return;
+    const nq = parseInt(q);
+    if (isNaN(nq) || nq <= 0) { alert('올바른 수량을 입력하세요.'); return; }
+    fetch(`/set-assembly/api/update/${id}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRFToken': _SET_CSRF},
+        body: JSON.stringify({qty: nq}),
+    }).then(r => r.json()).then(d => {
+        if (d.success) { alert('수정 완료'); location.reload(); }
+        else alert('실패: ' + (d.error || ''));
+    }).catch(e => alert('오류: ' + e.message));
 }
 </script>
 {% endblock %}

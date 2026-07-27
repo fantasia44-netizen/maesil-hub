@@ -107,7 +107,7 @@ def explode_bom(bom_lookup, set_name, channel, multiplier=1, _visited=None):
 
 def process_set_assembly(db, date_str, set_name, channel, location, qty,
                          sub_materials=None, storage_method_override=None,
-                         food_type=None, created_by=None):
+                         food_type=None, created_by=None, dry_run=False):
     """세트작업 처리 메인 함수.
 
     Args:
@@ -196,6 +196,11 @@ def process_set_assembly(db, date_str, set_name, channel, location, qty,
         return {'success': False,
                 'warnings': ['재고 부족으로 세트작업을 진행할 수 없습니다.'],
                 'shortage': shortage,
+                'set_out_count': 0, 'set_in_count': 0, 'sub_out_count': 0}
+
+    if dry_run:
+        # 사전 재고체크만 — 실제 차감/산출 없이 부족여부만 반환
+        return {'success': True, 'shortage': [], 'warnings': [],
                 'set_out_count': 0, 'set_in_count': 0, 'sub_out_count': 0}
 
     # 5. FIFO 차감 (SET_OUT) + 세트 산출 (SET_IN) payload 생성
@@ -324,10 +329,15 @@ def process_set_assembly(db, date_str, set_name, channel, location, qty,
     payload.append(set_in_payload)
     set_in_count = 1
 
-    # 8. DB 삽입 — created_by / status 일괄 주입
+    # 8. DB 삽입 — created_by / status / set_batch_id 일괄 주입
+    #    set_batch_id: 이 세트작업의 모든 행(SET_OUT+SET_IN)을 묶는 배치키.
+    #    → 취소 시 이 키로 묶인 전 행을 한꺼번에 되돌림(분해 복구).
+    import uuid as _uuid
+    batch_id = f"SET_{datetime.now().strftime('%Y%m%d%H%M%S')}_{_uuid.uuid4().hex[:6]}"
     for p in payload:
         p['created_by'] = created_by
         p['status'] = 'active'
+        p['set_batch_id'] = batch_id
     try:
         db.insert_stock_ledger(payload)
     except Exception as e:
@@ -343,4 +353,5 @@ def process_set_assembly(db, date_str, set_name, channel, location, qty,
         'shortage': [],
         'component_count': len(final_items),
         'total_deducted': sum(final_items.values()),
+        'set_batch_id': batch_id,
     }

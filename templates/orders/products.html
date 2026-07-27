@@ -3,6 +3,19 @@
 {% block content %}
 <h4 class="mb-3">상품관리</h4>
 
+<ul class="nav nav-tabs mb-3" id="productTabs">
+  <li class="nav-item">
+    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-products" type="button">상품 목록</button>
+  </li>
+  <li class="nav-item">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-rocket" type="button"
+            onclick="loadRocketProducts()">🚀 로켓상품관리</button>
+  </li>
+</ul>
+
+<div class="tab-content">
+<div class="tab-pane fade show active" id="tab-products" role="tabpanel">
+
 <!-- 검색/필터 -->
 <div class="card mb-3">
   <div class="card-body">
@@ -46,6 +59,48 @@
   </table>
 </div>
 <div id="pagination" class="d-flex justify-content-center"></div>
+
+</div><!-- /tab-products -->
+
+<!-- ═══════ 로켓상품관리 탭 ═══════ -->
+<div class="tab-pane fade" id="tab-rocket" role="tabpanel">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <div class="text-muted small">
+      로켓매출 수동입력 드롭다운에 뜨는 상품 목록입니다 (<code>master_prices.로켓판매가</code> 기준).
+      <span class="text-danger">유령</span> = 상품DB에 없는 잘못된 이름 → 정정 필요.
+    </div>
+    <button class="btn btn-success btn-sm" onclick="showRocketModal()">➕ 로켓상품 추가</button>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead class="table-light">
+        <tr><th>품목명</th><th class="text-end">로켓판매가</th><th class="text-center">상품DB</th><th class="text-center">관리</th></tr>
+      </thead>
+      <tbody id="rocketBody"></tbody>
+    </table>
+  </div>
+</div>
+
+</div><!-- /tab-content -->
+
+<!-- 로켓상품 추가/수정 모달 -->
+<div class="modal fade" id="rocketModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title" id="rocketModalTitle">로켓상품</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body">
+    <input type="hidden" id="rkOrigName" value="">
+    <div class="mb-2">
+      <label class="form-label">상품명 <span class="text-danger">*</span></label>
+      <input type="text" id="rkProductName" class="form-control form-control-sm" list="rkProductList" placeholder="상품DB의 정확한 이름 (예: 사과2p)">
+      <datalist id="rkProductList"></datalist>
+      <div class="form-text">상품DB에 있는 정확한 이름이어야 재고차감이 됩니다. (수정 시 유령이름 정정 가능)</div>
+    </div>
+    <div class="mb-2">
+      <label class="form-label">로켓판매가 <span class="text-danger">*</span></label>
+      <input type="number" id="rkPrice" class="form-control form-control-sm" min="1" value="0">
+    </div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-primary btn-sm" onclick="saveRocketProduct()">저장</button></div>
+</div></div></div>
 
 <!-- 신규/수정 모달 -->
 <div class="modal fade" id="productModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
@@ -254,6 +309,112 @@ async function saveProduct() {
       alert(d.message);
       bootstrap.Modal.getInstance(document.getElementById('productModal')).hide();
       loadProducts(currentPage);
+    });
+}
+
+// ═══════ 로켓상품관리 ═══════
+let _rocketLoaded = false;
+
+function loadRocketProducts() {
+  fetch('/orders/api/rocket-products', {headers: {'X-CSRFToken': CSRF_TOKEN}})
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) return alert(d.error);
+      _rocketLoaded = true;
+      const body = document.getElementById('rocketBody');
+      body.innerHTML = '';
+      if (!d.data.length) {
+        body.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">등록된 로켓상품이 없습니다.</td></tr>';
+        return;
+      }
+      d.data.forEach((it, idx) => {
+        window._rocketData = d.data;
+        const nm = (it.product_name || '').replace(/"/g, '&quot;');
+        const dbBadge = it.in_products
+          ? '<span class="badge bg-success">정상</span>'
+          : '<span class="badge bg-danger">유령</span>';
+        body.innerHTML += `<tr class="${it.in_products ? '' : 'table-warning'}">
+          <td><strong>${nm}</strong></td>
+          <td class="text-end">${(it.rocket_price||0).toLocaleString()}원</td>
+          <td class="text-center">${dbBadge}</td>
+          <td class="text-center">
+            <button class="btn btn-outline-primary btn-sm py-0" onclick="editRocket(window._rocketData[${idx}])">수정</button>
+            <button class="btn btn-outline-danger btn-sm py-0" onclick="removeRocket('${nm}')">제외</button>
+          </td>
+        </tr>`;
+      });
+    });
+}
+
+function _fillRocketDatalist() {
+  fetch('/orders/api/product-manage?per_page=1000', {headers: {'X-CSRFToken': CSRF_TOKEN}})
+    .then(r => r.json())
+    .then(d => {
+      const dl = document.getElementById('rkProductList');
+      dl.innerHTML = '';
+      (d.data || []).forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.product_name;
+        dl.appendChild(o);
+      });
+    });
+}
+
+function showRocketModal() {
+  document.getElementById('rocketModalTitle').textContent = '로켓상품 추가';
+  document.getElementById('rkOrigName').value = '';
+  document.getElementById('rkProductName').value = '';
+  document.getElementById('rkProductName').disabled = false;
+  document.getElementById('rkPrice').value = '';
+  _fillRocketDatalist();
+  new bootstrap.Modal(document.getElementById('rocketModal')).show();
+}
+
+function editRocket(it) {
+  document.getElementById('rocketModalTitle').textContent = '로켓상품 수정';
+  document.getElementById('rkOrigName').value = it.product_name;
+  document.getElementById('rkProductName').value = it.product_name;
+  document.getElementById('rkProductName').disabled = false;  // 유령이름 정정 허용
+  document.getElementById('rkPrice').value = it.rocket_price || 0;
+  _fillRocketDatalist();
+  new bootstrap.Modal(document.getElementById('rocketModal')).show();
+}
+
+function saveRocketProduct() {
+  const orig = document.getElementById('rkOrigName').value;
+  const name = document.getElementById('rkProductName').value.trim();
+  const price = parseFloat(document.getElementById('rkPrice').value) || 0;
+  if (!name) return alert('상품명을 입력하세요.');
+  if (price <= 0) return alert('로켓판매가를 입력하세요.');
+
+  // 추가는 기존 add-product API, 수정은 update API
+  const isEdit = !!orig;
+  const url = isEdit ? '/orders/api/rocket-products/update' : '/orders/api/rocket-manual/add-product';
+  const body = isEdit
+    ? {orig_name: orig, product_name: name, rocket_price: price}
+    : {product_name: name, rocket_price: price};
+
+  fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN}, body: JSON.stringify(body)})
+    .then(r => r.json())
+    .then(d => {
+      if (!(d.ok || d.success)) return alert('실패: ' + (d.error || ''));
+      alert(d.message || '저장 완료');
+      bootstrap.Modal.getInstance(document.getElementById('rocketModal')).hide();
+      loadRocketProducts();
+    })
+    .catch(e => alert('오류: ' + e.message));
+}
+
+function removeRocket(name) {
+  if (!confirm(`"${name}" 을(를) 로켓상품에서 제외할까요?\n(로켓매출 드롭다운에서 사라집니다)`)) return;
+  fetch('/orders/api/rocket-products/remove', {
+    method: 'POST', headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN},
+    body: JSON.stringify({product_name: name}),
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) return alert('실패: ' + (d.error || ''));
+      loadRocketProducts();
     });
 }
 

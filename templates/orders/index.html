@@ -336,6 +336,12 @@
                         <input type="text" id="newBarcode" class="form-control" value="">
                     </div>
                 </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">수량배수
+                        <span class="text-muted small">(1+1 → 2, 1+2 → 3)</span></label>
+                    <input type="number" id="newQtyMult" class="form-control" value="1" min="1">
+                    <div class="form-text">주문 1개라도 배수만큼 출고·재고차감. 매출은 주문수량 기준.</div>
+                </div>
                 <button type="button" class="btn btn-primary w-100" id="registerNewOption">
                     <i class="bi bi-check-circle"></i> 등록
                 </button>
@@ -445,6 +451,17 @@ document.addEventListener('DOMContentLoaded', function() { loadFileHistory(); })
         new bootstrap.Modal(document.getElementById('unmatchedModal')).show();
     }
 
+    // 주문 원문에서 증정옵션 배수 자동감지: "1+1"→2, "1+2"→3, "2+1"→3.
+    // 'N+M' 숫자쌍 패턴만 인식 → "한우1+"(등급)·"(X2개)"·"15g×6구"·"2개입" 오탐 방지.
+    function detectQtyMultiplier(text) {
+        const m = String(text || '').match(/(\d+)\s*\+\s*(\d+)/);
+        if (m) {
+            const total = parseInt(m[1]) + parseInt(m[2]);
+            if (total >= 2 && total <= 10) return total;
+        }
+        return 1;
+    }
+
     // ─────────── needs_review 렌더 ───────────
     function renderReviewList() {
         const container = document.getElementById('reviewList');
@@ -463,18 +480,25 @@ document.addEventListener('DOMContentLoaded', function() { loadFileHistory(); })
             const origDisplay = (item.key || '').replace(/"/g, '&quot;');
             const origShort = origDisplay.length > 80 ? origDisplay.substring(0, 80) + '...' : origDisplay;
 
+            // 주문 원문에서 증정옵션 배수 자동감지
+            const autoMult = detectQtyMultiplier(item.key || '');
+
             let candsHtml = '';
             (item.candidates || []).forEach((c, ci) => {
                 const pn = (c.product_name || '').replace(/"/g, '&quot;');
                 const on = (c.original_name || '').replace(/"/g, '&quot;');
+                const cm = parseInt(c.qty_multiplier) || 1;
+                const cmBadge = cm > 1
+                    ? ' <span class="badge bg-warning text-dark">×' + cm + '</span>' : '';
                 candsHtml +=
                     '<div class="form-check border rounded p-2 mb-1">' +
                         '<input class="form-check-input review-cand" type="radio" ' +
                         'name="cand-' + idx + '" id="cand-' + idx + '-' + ci + '" ' +
                         'data-pn="' + pn + '" data-line="' + (c.line_code || 0) + '" ' +
-                        'data-sort="' + (c.sort_order || 999) + '" data-barcode="' + (c.barcode || '') + '">' +
+                        'data-sort="' + (c.sort_order || 999) + '" data-barcode="' + (c.barcode || '') + '" ' +
+                        'data-mult="' + cm + '">' +
                         '<label class="form-check-label small" for="cand-' + idx + '-' + ci + '">' +
-                            '<strong>' + pn + '</strong>' +
+                            '<strong>' + pn + '</strong>' + cmBadge +
                             '<div class="text-muted" style="font-size:0.75rem;">' + on.substring(0, 100) + '</div>' +
                         '</label>' +
                     '</div>';
@@ -494,6 +518,15 @@ document.addEventListener('DOMContentLoaded', function() { loadFileHistory(); })
                     '</div>' +
                     '<div class="small text-muted mb-1">추천 후보 (선택):</div>' +
                     candsHtml +
+                    '<div class="d-flex align-items-center gap-2 mt-2 mb-1">' +
+                        '<label class="small mb-0">수량배수' +
+                            '<span class="text-muted"> (1+1→2, 1+2→3)</span>:</label>' +
+                        '<input type="number" min="1" class="form-control form-control-sm review-mult" ' +
+                            'id="mult-' + idx + '" value="' + autoMult + '" style="width:70px;">' +
+                        (autoMult > 1
+                            ? '<span class="badge bg-warning text-dark">주문원문에서 ×' + autoMult + ' 감지</span>'
+                            : '') +
+                    '</div>' +
                     '<div class="d-flex gap-2 mt-2">' +
                         '<button class="btn btn-sm btn-primary review-confirm" data-idx="' + idx + '">' +
                             '<i class="bi bi-check-lg"></i> 선택 확정 + 학습 등록' +
@@ -504,6 +537,15 @@ document.addEventListener('DOMContentLoaded', function() { loadFileHistory(); })
                     '</div>' +
                 '</div>';
             container.appendChild(card);
+        });
+
+        // 후보 선택 시: 후보의 배수가 현재 입력값보다 크면 자동 반영
+        container.querySelectorAll('.review-cand').forEach(r => {
+            r.addEventListener('change', () => {
+                const cm = parseInt(r.dataset.mult) || 1;
+                const inp = document.getElementById('mult-' + r.name.replace('cand-', ''));
+                if (inp && cm > (parseInt(inp.value) || 1)) inp.value = cm;
+            });
         });
 
         container.querySelectorAll('.review-confirm').forEach(b => {
@@ -526,12 +568,16 @@ document.addEventListener('DOMContentLoaded', function() { loadFileHistory(); })
         const selected = document.querySelector('input[name="cand-' + idx + '"]:checked');
         if (!selected) { alert('후보 중 하나를 선택하세요.'); return; }
 
+        const multInput = document.getElementById('mult-' + idx);
+        const qtyMult = Math.max(parseInt(multInput && multInput.value) || 1, 1);
+
         const payload = {
             original_name: item.key,
             product_name: selected.dataset.pn,
             line_code: selected.dataset.line || '0',
             sort_order: parseInt(selected.dataset.sort) || 999,
             barcode: selected.dataset.barcode || '',
+            qty_multiplier: qtyMult,
         };
 
         try {
@@ -562,6 +608,7 @@ document.addEventListener('DOMContentLoaded', function() { loadFileHistory(); })
         document.getElementById('newLineCode').value = '0';
         document.getElementById('newSortOrder').value = '999';
         document.getElementById('newBarcode').value = '';
+        document.getElementById('newQtyMult').value = detectQtyMultiplier(orig);
         // 제출 후 학습 등록되면 그 카드 마킹
         window._reviewIdx = idx;
         new bootstrap.Modal(document.getElementById('newOptionModal')).show();
@@ -699,7 +746,8 @@ document.addEventListener('DOMContentLoaded', function() { loadFileHistory(); })
                 '<small class="text-muted ms-2">라인:' + r.line_code + ' | 순서:' + r.sort_order + ' | 바코드:' + (r.barcode || '-') + '</small>';
             item.addEventListener('click', function(e) {
                 e.preventDefault();
-                registerMapping(idx, unmatchedItems[idx], r.product_name, r.line_code, r.sort_order, r.barcode || '');
+                registerMapping(idx, unmatchedItems[idx], r.product_name, r.line_code, r.sort_order, r.barcode || '',
+                    detectQtyMultiplier(unmatchedItems[idx]));
                 bootstrap.Modal.getInstance(document.getElementById('optionSearchModal')).hide();
             });
             container.appendChild(item);
@@ -714,6 +762,7 @@ document.addEventListener('DOMContentLoaded', function() { loadFileHistory(); })
         document.getElementById('newLineCode').value = '0';
         document.getElementById('newSortOrder').value = '999';
         document.getElementById('newBarcode').value = '';
+        document.getElementById('newQtyMult').value = detectQtyMultiplier(unmatchedItems[idx]);
 
         var modal = new bootstrap.Modal(document.getElementById('newOptionModal'));
         modal.show();
@@ -728,13 +777,14 @@ document.addEventListener('DOMContentLoaded', function() { loadFileHistory(); })
         registerMapping(idx, unmatchedItems[idx], productName,
             document.getElementById('newLineCode').value,
             parseInt(document.getElementById('newSortOrder').value),
-            document.getElementById('newBarcode').value);
+            document.getElementById('newBarcode').value,
+            Math.max(parseInt(document.getElementById('newQtyMult').value) || 1, 1));
 
         bootstrap.Modal.getInstance(document.getElementById('newOptionModal')).hide();
     });
 
     // --- API 등록 ---
-    function registerMapping(idx, originalName, productName, lineCode, sortOrder, barcode) {
+    function registerMapping(idx, originalName, productName, lineCode, sortOrder, barcode, qtyMult) {
         fetch('/orders/api/option-register', {
             method: 'POST',
             headers: {
@@ -746,7 +796,8 @@ document.addEventListener('DOMContentLoaded', function() { loadFileHistory(); })
                 product_name: productName,
                 line_code: String(lineCode),
                 sort_order: parseInt(sortOrder) || 999,
-                barcode: barcode || ''
+                barcode: barcode || '',
+                qty_multiplier: Math.max(parseInt(qtyMult) || 1, 1)
             })
         })
         .then(parseJsonSafe)

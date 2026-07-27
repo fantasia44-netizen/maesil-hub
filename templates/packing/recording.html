@@ -214,6 +214,12 @@
             </div>
         </div>
 
+        <!-- 카메라 선택 -->
+        <select id="cameraSelect" class="form-select form-select-sm"
+                style="margin:6px 0; font-size:0.85rem;">
+            <option>카메라 로딩 중…</option>
+        </select>
+
         <!-- 바코드 입력 -->
         <div class="barcode-area" id="barcodeArea">
             <i class="bi bi-upc-scan"></i>
@@ -341,21 +347,85 @@ document.addEventListener('DOMContentLoaded', () => {
     initBarcodeInput();
 });
 
-// ── 카메라 ──
+// ── 카메라 (장치 선택 지원 — 노트북/USB 등 여러 대) ──
+let currentDeviceId = localStorage.getItem('packing_camera_id') || '';
+
+function showCamError(e) {
+    $cameraPreview.style.display = 'none';
+    $cameraPlaceholder.style.display = 'block';
+    $cameraPlaceholder.innerHTML =
+        '<i class="bi bi-camera-video-off"></i>' +
+        '카메라를 사용할 수 없습니다<br>' +
+        '<small style="color:#ff5252;">' + (e && e.message ? e.message : e) + '</small>' +
+        '<br><small style="color:#aaa;">위 목록에서 다른 카메라를 선택해보세요</small>';
+}
+
+async function startCameraStream(deviceId) {
+    // 기존 스트림 정리
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
+    }
+    const video = deviceId
+        ? { deviceId: { exact: deviceId }, width:{ideal:1280}, height:{ideal:720} }
+        : { width:{ideal:1280}, height:{ideal:720} };
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video, audio:false });
+    $cameraPreview.srcObject = cameraStream;
+    $cameraPreview.style.display = 'block';
+    $cameraPlaceholder.style.display = 'none';
+}
+
+async function populateCameraList() {
+    const sel = document.getElementById('cameraSelect');
+    let devices = [];
+    try { devices = await navigator.mediaDevices.enumerateDevices(); } catch(_) {}
+    const cams = devices.filter(d => d.kind === 'videoinput');
+    sel.innerHTML = '';
+    if (!cams.length) {
+        sel.innerHTML = '<option>카메라 없음</option>';
+        return;
+    }
+    cams.forEach((c, i) => {
+        const opt = document.createElement('option');
+        opt.value = c.deviceId;
+        opt.textContent = c.label || ('카메라 ' + (i + 1));
+        sel.appendChild(opt);
+    });
+    // 저장된 선택 복원, 없으면 첫 번째
+    if (currentDeviceId && cams.some(c => c.deviceId === currentDeviceId)) {
+        sel.value = currentDeviceId;
+    } else {
+        currentDeviceId = cams[0].deviceId;
+        sel.value = currentDeviceId;
+    }
+    sel.onchange = async () => {
+        currentDeviceId = sel.value;
+        localStorage.setItem('packing_camera_id', currentDeviceId);
+        try { await startCameraStream(currentDeviceId); }
+        catch(e) { showCamError(e); }
+    };
+}
+
 async function initCamera() {
+    // 1) 권한 획득 겸 첫 스트림 (라벨 노출 위해 먼저 시작)
     try {
-        cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { width:{ideal:1280}, height:{ideal:720}, facingMode:'environment' },
-            audio: false,
-        });
-        $cameraPreview.srcObject = cameraStream;
-        $cameraPreview.style.display = 'block';
-        $cameraPlaceholder.style.display = 'none';
+        await startCameraStream(currentDeviceId || '');
     } catch(e) {
-        $cameraPlaceholder.innerHTML =
-            '<i class="bi bi-camera-video-off"></i>' +
-            '카메라를 사용할 수 없습니다<br>' +
-            '<small style="color:#ff5252;">' + e.message + '</small>';
+        showCamError(e);
+    }
+    // 2) 장치 목록 채우기 (권한 후 label 사용 가능)
+    await populateCameraList();
+    // 3) 선택된(저장된) 카메라가 지금 켜진 것과 다르면 그걸로 재시작
+    try {
+        const track = cameraStream && cameraStream.getVideoTracks()[0];
+        const activeId = track ? track.getSettings().deviceId : '';
+        if (currentDeviceId && currentDeviceId !== activeId) {
+            await startCameraStream(currentDeviceId);
+        }
+    } catch(e) { showCamError(e); }
+    // 4) USB 카메라 꽂/뺌 감지 → 목록 갱신
+    if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+        navigator.mediaDevices.addEventListener('devicechange', () => populateCameraList());
     }
 }
 

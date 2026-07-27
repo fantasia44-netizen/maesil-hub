@@ -5,7 +5,7 @@ adjustment.py — 재고 조정 Blueprint.
 """
 import uuid
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from services.tz_utils import today_kst
 
 from flask import (
@@ -239,7 +239,11 @@ def survey_export_stock():
     after_movements = {}
     if survey_date:
         try:
-            survey_next = survey_date + 'T23:59:59'
+            # transaction_date는 DATE 컬럼 → 'T23:59:59' 시각부분이 잘려
+            # gte 경계가 survey_date 당일을 포함해버린다(off-by-one). 실사일
+            # '다음날' 00:00부터를 조회해야 실사 이후 이동만 잡힘(total에서 규명).
+            survey_next = (datetime.strptime(survey_date, '%Y-%m-%d')
+                           + timedelta(days=1)).strftime('%Y-%m-%d')
             all_mvs = db.query_stock_ledger(
                 date_from=survey_next, date_to='2099-12-31',
                 location=location)
@@ -373,7 +377,9 @@ def survey_preview():
             _after_mv_cache[loc] = {}
             if survey_date:
                 try:
-                    survey_next = survey_date + 'T23:59:59'
+                    # DATE 컬럼 off-by-one 방지: 실사일 다음날부터 조회
+                    survey_next = (datetime.strptime(survey_date, '%Y-%m-%d')
+                                   + timedelta(days=1)).strftime('%Y-%m-%d')
                     all_mvs = db.query_stock_ledger(
                         date_from=survey_next, date_to='2099-12-31', location=loc)
                     for mv in all_mvs:

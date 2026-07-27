@@ -9,7 +9,7 @@ from services.tz_utils import today_kst
 import pandas as pd
 from flask import (
     Blueprint, render_template, request, current_app,
-    flash, redirect, url_for, jsonify,
+    flash, redirect, url_for, jsonify, g,
 )
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
@@ -60,17 +60,31 @@ def api_history():
     prod_filter = (request.args.get('product') or '').strip()
     limit = int(request.args.get('limit', 200))
 
+    biz_id = g.biz_id
     try:
-        q = db.client.table('stock_ledger').select(
-            'id,transaction_date,type,product_name,qty,location,'
-            'transfer_id,manufacture_date,lot_number,grade,'
-            'created_by,created_at,status,unit'
-        ).in_('type', ['MOVE_OUT', 'MOVE_IN']) \
-         .gte('transaction_date', date_from) \
-         .lte('transaction_date', date_to) \
-         .or_('status.is.null,status.eq.active') \
-         .order('id', desc=True).limit(2000)
-        rows = q.execute().data or []
+        # 범위 내 전체 MOVE 행을 페이지네이션으로 조회.
+        # ※ 단일 .limit(2000)은 Supabase max_rows(=1000)에 잘려 최신 1000행만
+        #   반환됨 → 범위 내 이동이 1000건 넘으면 오래된 이동이 이력에서 통째로
+        #   누락되는 버그(total에서 규명). range() 루프로 전량 확보.
+        # + biz_id 필터: 앱이 service_role로 접속해 RLS가 우회되므로 테넌트 격리를
+        #   명시적으로 걸어야 함(누락 시 전 테넌트 이동이력 노출).
+        rows = []
+        _off = 0
+        while True:
+            _b = db.client.table('stock_ledger').select(
+                'id,transaction_date,type,product_name,qty,location,'
+                'transfer_id,manufacture_date,lot_number,grade,'
+                'created_by,created_at,status,unit'
+            ).eq('biz_id', biz_id) \
+             .in_('type', ['MOVE_OUT', 'MOVE_IN']) \
+             .gte('transaction_date', date_from) \
+             .lte('transaction_date', date_to) \
+             .or_('status.is.null,status.eq.active') \
+             .order('id', desc=True).range(_off, _off + 999).execute().data or []
+            rows.extend(_b)
+            if len(_b) < 1000:
+                break
+            _off += 1000
 
         # transfer_id 그룹핑
         groups = defaultdict(lambda: {'out_rows': [], 'in_rows': []})

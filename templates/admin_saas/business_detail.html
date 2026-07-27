@@ -125,7 +125,7 @@
         <tr>
           <td class="small">{{ (a.created_at or '')[:19] | replace('T',' ') }}</td>
           <td><code>{{ a.action }}</code></td>
-          <td class="small text-muted">{{ a.detail | tojson(ensure_ascii=False) if a.detail else '' }}</td>
+          <td class="small text-muted">{{ a.detail | tojson if a.detail else '' }}</td>
         </tr>
         {% else %}
         <tr><td colspan="3" class="text-center text-muted">활동 기록 없음</td></tr>

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}회원사 목록{% endblock %}
 {% block content %}
+{% include 'admin_saas/_nav.html' %}
 <h3>회원사 목록</h3>
 <form method="get" class="row g-2 mb-3">
   <div class="col-auto">
@@ -25,7 +26,7 @@
     {% for b in businesses %}
     <tr>
       <td>{{ b.id }}</td>
-      <td>{{ b.name }}</td>
+      <td><a href="{{ url_for('admin_saas.business_detail', biz_id=b.id) }}">{{ b.name }}</a></td>
       <td>{{ b.representative or '-' }}</td>
       <td>{{ b.plan_name }}</td>
       <td>
@@ -36,16 +37,20 @@
       <td>{{ b.subscription_status }}</td>
       <td>{{ (b.created_at or '')[:10] }}</td>
       <td>
+        <a href="{{ url_for('admin_saas.business_detail', biz_id=b.id) }}" class="btn btn-sm btn-outline-primary">상세</a>
         <form method="post" action="{{ url_for('admin_saas.impersonate', biz_id=b.id) }}" class="d-inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="btn btn-sm btn-outline-warning"
                   onclick="return confirm('이 회사로 위장 진입?')">위장</button>
         </form>
         {% if b.status == 'suspended' %}
           <form method="post" action="{{ url_for('admin_saas.activate_business', biz_id=b.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-sm btn-outline-success">복구</button>
           </form>
         {% else %}
           <form method="post" action="{{ url_for('admin_saas.suspend_business', biz_id=b.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="reason" value="admin manual">
             <button class="btn btn-sm btn-outline-danger"
                     onclick="return confirm('정지하시겠습니까?')">정지</button>

@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}{{ biz.name }} — 회원사 상세{% endblock %}
+{% block content %}
+{% include 'admin_saas/_nav.html' %}
+
+<div class="d-flex align-items-center gap-2 mb-3">
+  <a href="{{ url_for('admin_saas.businesses_list') }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+  <h3 class="mb-0">{{ biz.name }}</h3>
+  {% if biz.status == 'active' %}<span class="badge bg-success">active</span>
+  {% elif biz.status == 'suspended' %}<span class="badge bg-danger">suspended</span>
+  {% else %}<span class="badge bg-secondary">{{ biz.status }}</span>{% endif %}
+  <span class="text-muted small">biz_id={{ biz.id }}</span>
+  <form method="post" action="{{ url_for('admin_saas.impersonate', biz_id=biz.id) }}" class="d-inline ms-auto">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-sm btn-outline-warning" onclick="return confirm('이 회사로 위장 진입?')"><i class="bi bi-person-badge"></i> 위장 진입</button>
+  </form>
+</div>
+
+<div class="row g-3">
+  <!-- 회원사 정보 -->
+  <div class="col-lg-6">
+    <div class="card h-100"><div class="card-header"><i class="bi bi-building"></i> 회원사 정보</div>
+      <div class="card-body">
+        <table class="table table-sm mb-0">
+          <tr><th class="text-muted" style="width:35%">대표자</th><td>{{ biz.representative or '-' }}</td></tr>
+          <tr><th class="text-muted">사업자번호</th><td>{{ biz.biz_reg_no or '-' }}</td></tr>
+          <tr><th class="text-muted">업종</th><td>{{ biz.industry or '-' }}</td></tr>
+          <tr><th class="text-muted">주소</th><td>{{ biz.address or '-' }}</td></tr>
+          <tr><th class="text-muted">가입일</th><td>{{ (biz.created_at or '')[:10] }}</td></tr>
+          <tr><th class="text-muted">온보딩</th><td>{% if biz.onboarding_completed %}완료{% else %}step {{ biz.onboarding_step or 0 }}{% endif %}</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 구독 제어 -->
+  <div class="col-lg-6">
+    <div class="card h-100"><div class="card-header"><i class="bi bi-star"></i> 구독 / 플랜 제어</div>
+      <div class="card-body">
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label small text-muted mb-1">플랜</label>
+            <select id="subPlan" class="form-select form-select-sm">
+              {% for p in plans %}
+              <option value="{{ p.id }}" {% if sub and sub.plan_id==p.id %}selected{% elif not sub and biz.plan_id==p.id %}selected{% endif %}>{{ p.name }} ({{ '{:,}'.format(p.monthly_price or 0) }}원)</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label small text-muted mb-1">구독 상태</label>
+            <select id="subStatus" class="form-select form-select-sm">
+              {% set cur_st = (sub.status if sub else biz.subscription_status) or 'trial' %}
+              {% for st in ['trial','active','past_due','cancelled','suspended'] %}
+              <option value="{{ st }}" {% if cur_st==st %}selected{% endif %}>{{ st }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label small text-muted mb-1">체험 만료일</label>
+            <input type="date" id="subTrialEnd" class="form-control form-control-sm"
+                   value="{{ (biz.trial_ends_at or '')[:10] }}">
+          </div>
+          <div class="col-6">
+            <label class="form-label small text-muted mb-1">구독 만료일</label>
+            <input type="date" id="subPeriodEnd" class="form-control form-control-sm"
+                   value="{{ (sub.current_period_end or '')[:10] if sub else '' }}">
+          </div>
+        </div>
+        <button class="btn btn-sm btn-primary mt-3" onclick="saveSubscription({{ biz.id }})"><i class="bi bi-save"></i> 구독 저장</button>
+        <div id="subMsg" class="small mt-2"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 소속 사용자 -->
+<div class="card mt-3"><div class="card-header"><i class="bi bi-people"></i> 소속 사용자 ({{ members|length }}명)</div>
+  <div class="card-body p-0">
+    <table class="table table-sm table-hover mb-0 align-middle">
+      <thead class="table-light"><tr>
+        <th>이메일</th><th>이름</th><th>역할</th><th>최근 로그인</th><th>상태</th><th class="text-end">액션</th>
+      </tr></thead>
+      <tbody>
+        {% for m in members %}
+        <tr id="mrow-{{ m.user_id }}">
+          <td>{{ m.email }}{% if m.is_primary %} <span class="badge bg-info">primary</span>{% endif %}</td>
+          <td>{{ m.name or '-' }}</td>
+          <td>
+            <select class="form-select form-select-sm d-inline-block" style="width:auto" onchange="changeRole({{ biz.id }},{{ m.user_id }},this.value)">
+              {% for rk, rl in role_labels.items() %}
+              <option value="{{ rk }}" {% if m.role==rk %}selected{% endif %}>{{ rl }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td class="small">{{ (m.last_login_at or '')[:16] | replace('T',' ') or '-' }}</td>
+          <td>
+            {% if m.is_locked %}<span class="badge bg-danger">잠금</span>{% endif %}
+            {% if m.is_deleted %}<span class="badge bg-secondary">비활성</span>{% endif %}
+            {% if not m.email_verified %}<span class="badge bg-warning text-dark">미인증</span>{% endif %}
+            {% if not m.is_locked and not m.is_deleted and m.email_verified %}<span class="badge bg-success">정상</span>{% endif %}
+          </td>
+          <td class="text-end">
+            {% if m.is_locked %}
+            <button class="btn btn-sm btn-outline-warning" onclick="unlockUser({{ biz.id }},{{ m.user_id }})"><i class="bi bi-unlock"></i> 잠금해제</button>
+            {% endif %}
+            <button class="btn btn-sm btn-outline-primary" onclick="resetPw({{ biz.id }},{{ m.user_id }})"><i class="bi bi-key"></i> 비번리셋</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="removeUser({{ biz.id }},{{ m.user_id }},'{{ m.email }}')"><i class="bi bi-x-lg"></i> 소속해제</button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-center text-muted">소속 사용자 없음</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 최근 활동 -->
+<div class="card mt-3"><div class="card-header"><i class="bi bi-clock-history"></i> 최근 활동 (30건)</div>
+  <div class="card-body p-0">
+    <table class="table table-sm mb-0">
+      <thead class="table-light"><tr><th style="width:160px">시각</th><th style="width:180px">액션</th><th>상세</th></tr></thead>
+      <tbody>
+        {% for a in activity %}
+        <tr>
+          <td class="small">{{ (a.created_at or '')[:19] | replace('T',' ') }}</td>
+          <td><code>{{ a.action }}</code></td>
+          <td class="small text-muted">{{ a.detail | tojson(ensure_ascii=False) if a.detail else '' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="text-center text-muted">활동 기록 없음</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const CSRF = document.querySelector('meta[name="csrf-token"]').content;
+async function post(url, body){
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':CSRF}, body: JSON.stringify(body||{})});
+  return r.json();
+}
+async function saveSubscription(bizId){
+  const msg = document.getElementById('subMsg');
+  msg.textContent = '저장 중...'; msg.className='small mt-2 text-muted';
+  const res = await post(`/admin-saas/businesses/${bizId}/subscription`, {
+    plan_id: document.getElementById('subPlan').value,
+    status: document.getElementById('subStatus').value,
+    trial_ends_at: document.getElementById('subTrialEnd').value,
+    current_period_end: document.getElementById('subPeriodEnd').value,
+  });
+  if(res.ok){ msg.textContent='✓ 저장됨'; msg.className='small mt-2 text-success'; }
+  else { msg.textContent='✗ '+(res.error||'실패'); msg.className='small mt-2 text-danger'; }
+}
+async function changeRole(bizId, userId, role){
+  const res = await post(`/admin-saas/businesses/${bizId}/users/${userId}/role`, {role});
+  if(!res.ok) alert('역할 변경 실패: '+(res.error||''));
+}
+async function unlockUser(bizId, userId){
+  const res = await post(`/admin-saas/businesses/${bizId}/users/${userId}/unlock`, {});
+  if(res.ok){ alert('잠금 해제됨'); location.reload(); } else alert('실패: '+(res.error||''));
+}
+async function resetPw(bizId, userId){
+  if(!confirm('비밀번호 재설정 링크를 발급하시겠습니까?')) return;
+  const res = await post(`/admin-saas/businesses/${bizId}/users/${userId}/reset-password`, {});
+  if(res.ok){
+    const mailed = res.mail_sent ? '\n(이메일도 발송됨)' : '\n(이메일 미발송 — 아래 링크를 직접 전달)';
+    prompt('재설정 링크 ('+res.expires_in+' 유효)'+mailed+'\n복사해서 전달하세요:', res.reset_url);
+  } else alert('실패: '+(res.error||''));
+}
+async function removeUser(bizId, userId, email){
+  if(!confirm(email+' 사용자를 이 회원사에서 소속 해제하시겠습니까?\n(계정 자체는 유지)')) return;
+  const res = await post(`/admin-saas/businesses/${bizId}/users/${userId}/remove`, {});
+  if(res.ok){ document.getElementById('mrow-'+userId).remove(); } else alert('실패: '+(res.error||''));
+}
+</script>
+{% endblock %}

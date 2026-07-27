@@ -25,3 +25,4 @@
 - 023_app_settings.sql — development — 2026-07-27 15:21
 - 024_get_order_revenue_agg.sql — development — 2026-07-28 00:20
 - 025_order_shipping_fee.sql — development — 2026-07-28 00:20
+- 026_system_notices.sql — development — 2026-07-28 01:10

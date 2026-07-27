@@ -1,7 +1,13 @@
 {% extends "base.html" %}
 {% block title %}슈퍼어드민 — 매실 허브{% endblock %}
 {% block content %}
-<h3>SaaS 운영 대시보드</h3>
+{% include 'admin_saas/_nav.html' %}
+
+<div class="d-flex align-items-center mb-3">
+  <h3 class="mb-0">SaaS 운영 대시보드</h3>
+  <span id="healthBadge" class="badge bg-secondary ms-3">서버 상태 확인중…</span>
+</div>
+
 <div class="row">
   <div class="col-md-3"><div class="card mb-3"><div class="card-body">
     <div class="text-muted small">전체 회원사</div>
@@ -19,11 +25,74 @@
     <div class="small">결제 {{ summary.paid_count_this_month }}건</div>
   </div></div></div>
   <div class="col-md-3"><div class="card mb-3"><div class="card-body">
-    <ul class="list-unstyled mb-0">
-      <li><a href="{{ url_for('admin_saas.businesses_list') }}">→ 회원사 목록</a></li>
-      <li><a href="{{ url_for('admin_saas.payments_list') }}">→ 결제 내역</a></li>
-      <li><a href="{{ url_for('admin_saas.config_list') }}">→ 시스템 설정</a></li>
-    </ul>
+    <div class="text-muted small">서버 리소스</div>
+    <div id="healthMem" class="display-6">–</div>
+    <div id="healthMeta" class="small text-muted">–</div>
   </div></div></div>
 </div>
+
+<div class="row g-3">
+  <!-- 최근 로그인 -->
+  <div class="col-lg-6">
+    <div class="card"><div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-person-check"></i> 최근 로그인</span>
+      <button class="btn btn-sm btn-outline-secondary" onclick="loadRecentUsers()"><i class="bi bi-arrow-clockwise"></i></button>
+    </div>
+      <div class="card-body p-0"><div class="table-responsive" style="max-height:340px;overflow-y:auto">
+        <table class="table table-sm mb-0"><thead class="table-light"><tr><th>이메일</th><th>회원사</th><th>시각</th></tr></thead>
+          <tbody id="recentUsersBody"><tr><td colspan="3" class="text-center text-muted">로딩…</td></tr></tbody>
+        </table></div></div>
+    </div>
+  </div>
+
+  <!-- 최근 활동 로그 -->
+  <div class="col-lg-6">
+    <div class="card"><div class="card-header d-flex justify-content-between align-items-center">
+      <span><i class="bi bi-clock-history"></i> 최근 활동 로그</span>
+      <button class="btn btn-sm btn-outline-secondary" onclick="loadActivity()"><i class="bi bi-arrow-clockwise"></i></button>
+    </div>
+      <div class="card-body p-0"><div class="table-responsive" style="max-height:340px;overflow-y:auto">
+        <table class="table table-sm mb-0"><thead class="table-light"><tr><th>시각</th><th>회원사</th><th>액션</th></tr></thead>
+          <tbody id="activityBody"><tr><td colspan="3" class="text-center text-muted">로딩…</td></tr></tbody>
+        </table></div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+async function loadHealth(){
+  try{
+    const r = await fetch('/admin-saas/api/health'); const d = await r.json();
+    const badge = document.getElementById('healthBadge');
+    badge.textContent = '서버 ' + (d.status==='ok'?'정상':d.status);
+    badge.className = 'badge ms-3 ' + (d.status==='ok'?'bg-success':'bg-warning text-dark');
+    if(d.web){
+      document.getElementById('healthMem').innerHTML = (d.web.memory_mb ?? '–') + '<small>MB</small>';
+      const up = d.web.uptime_seconds ? Math.floor(d.web.uptime_seconds/3600)+'h' : '';
+      document.getElementById('healthMeta').textContent =
+        `thread ${d.web.num_threads??'-'} · DB ${d.db?.latency_ms??'-'}ms · up ${up}`;
+    }
+  }catch(e){ document.getElementById('healthBadge').textContent='상태 확인 실패'; }
+}
+async function loadRecentUsers(){
+  const tb = document.getElementById('recentUsersBody');
+  try{
+    const r = await fetch('/admin-saas/api/recent-users'); const d = await r.json();
+    if(!d.ok || !d.rows.length){ tb.innerHTML='<tr><td colspan=3 class="text-center text-muted">없음</td></tr>'; return; }
+    tb.innerHTML = d.rows.map(u=>`<tr><td>${u.email}${u.is_super_admin?' <span class="badge bg-warning text-dark">SA</span>':''}</td><td class="small">${u.businesses}</td><td class="small">${(u.last_login_at||'').slice(0,16).replace('T',' ')}</td></tr>`).join('');
+  }catch(e){ tb.innerHTML='<tr><td colspan=3 class="text-danger">로드 실패</td></tr>'; }
+}
+async function loadActivity(){
+  const tb = document.getElementById('activityBody');
+  try{
+    const r = await fetch('/admin-saas/api/activity-log'); const d = await r.json();
+    if(!d.ok || !d.rows.length){ tb.innerHTML='<tr><td colspan=3 class="text-center text-muted">없음</td></tr>'; return; }
+    tb.innerHTML = d.rows.map(a=>`<tr><td class="small">${(a.created_at||'').slice(0,19).replace('T',' ')}</td><td class="small">${a.biz_name||'-'}</td><td><code class="small">${a.action}</code></td></tr>`).join('');
+  }catch(e){ tb.innerHTML='<tr><td colspan=3 class="text-danger">로드 실패</td></tr>'; }
+}
+loadHealth(); loadRecentUsers(); loadActivity();
+setInterval(loadHealth, 30000);
+</script>
 {% endblock %}

@@ -39,6 +39,13 @@ BOX_TYPES = {
     '이형': '05', '취급제한': '06', '대2': '07',
 }
 
+# 운임구분 (FRT_DV_CD) — 계약 조건에 맞춰. 넥스원프레시 CJ 계약은 '선불'.
+#   (이전엔 '03' 신용 하드코딩돼 실제 운송장(선불)과 불일치)
+FARE_TYPES = {
+    '선불': '01', '착불': '02', '신용': '03',
+}
+DEFAULT_FARE_TYPE = '선불'
+
 
 class CJCourierClient:
     """CJ대한통운 택배 표준 API 클라이언트.
@@ -186,7 +193,9 @@ class CJCourierClient:
     def register_shipment(self, sender: dict, receiver: dict,
                           items: list, invoice_no: str = '',
                           order_no: str = '', memo: str = '',
-                          box_type: str = '소') -> dict:
+                          box_type: str = '소',
+                          fare_type: str = DEFAULT_FARE_TYPE,
+                          dlcm_cd: str = '') -> dict:
         """단건 배송 예약 접수.
 
         Args:
@@ -248,12 +257,15 @@ class CJCourierClient:
                 'REQ_DV_CD': '01',       # 요청
                 'MPCK_KEY': mpck_key,
                 'CAL_DV_CD': '01',       # 계약운임
-                'FRT_DV_CD': '03',       # 신용
+                # 운임구분 — 계약 조건에 맞춰 지정 (기본 선불). 01선불/02착불/03신용
+                'FRT_DV_CD': FARE_TYPES.get(fare_type, FARE_TYPES[DEFAULT_FARE_TYPE]),
                 'CNTR_ITEM_CD': '01',    # 일반품목
                 'BOX_TYPE_CD': BOX_TYPES.get(box_type, '02'),
                 'BOX_QTY': '1',
                 'FRT': '',
-                'CUST_MGMT_DLCM_CD': self.cust_id,
+                # 협력사코드 — 넥스원출고분은 dlcm_cd(아이스박스넥스원프레시),
+                # 없으면 주관고객코드. (인증계정은 항상 주관고객, B는 협력사코드일 뿐)
+                'CUST_MGMT_DLCM_CD': dlcm_cd or self.cust_id,
                 'DLV_DV': '01',          # 택배
 
                 # 보내는분 (NOT NULL 필드 빈값 방어)
@@ -287,7 +299,9 @@ class CJCourierClient:
                 'INVC_NO': invoice_no or '',
                 'ORI_INVC_NO': '',
                 'ORI_ORD_NO': '',
-                'PRT_ST': '03' if invoice_no else '01',  # 선발번 / 미출력
+                # PRT_ST: 자체출력 고객사는 '02' (CJ 전승재 담당 확인, 2026-07).
+                #   01=미출력 / 02=자체출력 / 03=선발번(LoIS 프로그램 출력)
+                'PRT_ST': '02' if invoice_no else '01',
                 'ARTICLE_AMT': '',
 
                 # 비고
@@ -324,6 +338,22 @@ class CJCourierClient:
                 }
             else:
                 err = data.get('RESULT_DETAIL', '알 수 없는 오류')
+                # ── ORA-00001 = Oracle 유니크 제약(CUST_USE_NO) 위반 ──
+                #   "이 주문번호는 이미 CJ에 접수됨". 성공처리 금지 — 재시도 시 채번을
+                #   다시 했다면 CJ 등록번호와 라벨/DB가 어긋난다. 중복 플래그로 구분.
+                if 'ORA-00001' in err:
+                    log.error(
+                        f'[CJ] 예약접수 중복 — 주문번호 {cust_use_no} 는 이미 CJ에 '
+                        f'접수됨. CJ 등록 운송장번호 확인 필요 (이번 시도: {invoice_no})'
+                    )
+                    return {
+                        'ok': False,
+                        'duplicate': True,
+                        'error': (f'이미 접수된 주문번호입니다({cust_use_no}). '
+                                  f'CJ에 등록된 운송장번호를 확인하세요.'),
+                        'cust_use_no': cust_use_no,
+                        'courier': 'CJ대한통운',
+                    }
                 log.error(f'[CJ] 예약접수 실패: {err}')
                 return {'ok': False, 'error': err, 'courier': 'CJ대한통운'}
 

@@ -35,7 +35,8 @@
     <thead class="table-light">
       <tr>
         <th>ID</th><th>원문명</th><th>품목명</th><th>라인코드</th>
-        <th>출력순서</th><th>바코드</th><th>마지막 매칭</th><th>관리</th>
+        <th>출력순서</th><th title="1+1=2, 1+2=3 — 출고·재고차감 배수">수량배수</th>
+        <th>바코드</th><th>마지막 매칭</th><th>관리</th>
       </tr>
     </thead>
     <tbody id="optionBody"></tbody>
@@ -53,6 +54,11 @@
       <div class="col-4"><label class="form-label">라인코드</label><input type="number" id="addLineCode" class="form-control form-control-sm" value="0"></div>
       <div class="col-4"><label class="form-label">출력순서</label><input type="number" id="addSortOrder" class="form-control form-control-sm" value="999"></div>
       <div class="col-4"><label class="form-label">바코드</label><input type="text" id="addBarcode" class="form-control form-control-sm"></div>
+    </div>
+    <div class="mb-2">
+      <label class="form-label">수량배수 <span class="text-muted small">(1+1 → 2, 1+2 → 3)</span></label>
+      <input type="number" id="addQtyMult" class="form-control form-control-sm" value="1" min="1">
+      <div class="form-text">주문 1개라도 배수만큼 출고·재고차감. 매출은 주문수량 기준(증정분 무상).</div>
     </div>
   </div>
   <div class="modal-footer">
@@ -72,6 +78,11 @@
       <div class="col-4"><label class="form-label">라인코드</label><input type="number" id="fLineCode" class="form-control form-control-sm"></div>
       <div class="col-4"><label class="form-label">출력순서</label><input type="number" id="fSortOrder" class="form-control form-control-sm"></div>
       <div class="col-4"><label class="form-label">바코드</label><input type="text" id="fBarcode" class="form-control form-control-sm"></div>
+    </div>
+    <div class="mb-2">
+      <label class="form-label">수량배수 <span class="text-muted small">(1+1 → 2, 1+2 → 3)</span></label>
+      <input type="number" id="fQtyMult" class="form-control form-control-sm" min="1">
+      <div class="form-text">주문 1개라도 배수만큼 출고·재고차감. 매출은 주문수량 기준(증정분 무상).</div>
     </div>
   </div>
   <div class="modal-footer"><button class="btn btn-primary btn-sm" onclick="saveOption()">저장</button></div>
@@ -102,6 +113,9 @@ function loadOptions(page=1) {
           <td><strong>${o.product_name||''}</strong></td>
           <td class="text-center">${o.line_code??''}</td>
           <td class="text-center">${o.sort_order??999}</td>
+          <td class="text-center">${(o.qty_multiplier??1) > 1
+            ? `<span class="badge bg-warning text-dark">×${o.qty_multiplier}</span>`
+            : '<span class="text-muted">1</span>'}</td>
           <td>${o.barcode||''}</td>
           <td class="text-muted">${matched}</td>
           <td><button class="btn btn-outline-primary btn-sm py-0" onclick="editOption(window._optionData[${idx}])">수정</button></td>
@@ -122,6 +136,7 @@ function editOption(o) {
   document.getElementById('fLineCode').value = o.line_code ?? '';
   document.getElementById('fSortOrder').value = o.sort_order ?? 999;
   document.getElementById('fBarcode').value = o.barcode || '';
+  document.getElementById('fQtyMult').value = o.qty_multiplier ?? 1;
   new bootstrap.Modal(document.getElementById('optionModal')).show();
 }
 
@@ -132,6 +147,7 @@ function saveOption() {
     line_code: parseInt(document.getElementById('fLineCode').value) || 0,
     sort_order: parseInt(document.getElementById('fSortOrder').value) || 999,
     barcode: document.getElementById('fBarcode').value.trim(),
+    qty_multiplier: Math.max(parseInt(document.getElementById('fQtyMult').value) || 1, 1),
   };
 
   fetch(`/orders/api/options/${id}`, {method: 'PUT', headers: {'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN}, body: JSON.stringify(body)})
@@ -150,6 +166,7 @@ function openAddModal() {
   document.getElementById('addLineCode').value = '0';
   document.getElementById('addSortOrder').value = '999';
   document.getElementById('addBarcode').value = '';
+  document.getElementById('addQtyMult').value = '1';
   new bootstrap.Modal(document.getElementById('addOptionModal')).show();
   setTimeout(() => document.getElementById('addOriginal').focus(), 300);
 }
@@ -165,6 +182,7 @@ function saveNewOption() {
     line_code: document.getElementById('addLineCode').value || '0',
     sort_order: parseInt(document.getElementById('addSortOrder').value) || 999,
     barcode: document.getElementById('addBarcode').value.trim(),
+    qty_multiplier: Math.max(parseInt(document.getElementById('addQtyMult').value) || 1, 1),
   };
 
   fetch('/orders/api/option-register', {

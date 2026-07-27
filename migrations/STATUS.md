@@ -20,3 +20,8 @@
 - 016_fix_rpc_types.sql — development — 2026-05-22 10:58
 - 017_shipment_stats_fix.sql — development — 2026-05-22 11:12
 - 018_revenue_rows_rpc.sql — development — 2026-05-22 11:18
+- 021_option_qty_multiplier.sql — development — 2026-07-27 15:21
+- 022_set_batch_id.sql — development — 2026-07-27 15:21
+- 023_app_settings.sql — development — 2026-07-27 15:21
+- 024_get_order_revenue_agg.sql — development — 2026-07-28 00:20
+- 025_order_shipping_fee.sql — development — 2026-07-28 00:20

@@ -5994,6 +5994,40 @@ class SupabaseDB(DBBase):
         except Exception as e:
             print(f"[DB] upsert_marketplace_api_config error: {e}")
 
+    # ── app_settings (테넌트별 무인 자동화 토글/이력) ──
+
+    def get_app_setting(self, key, default=None, *, biz_id=None):
+        """app_settings 값 조회(테넌트별). Returns: value(dict) 또는 default."""
+        biz_id = self._resolve_biz_id(biz_id)
+        try:
+            q = self.client.table("app_settings").select("value").eq("key", key)
+            res = self._with_biz(q, biz_id).limit(1).execute()
+            if res.data:
+                return res.data[0].get("value", default)
+            return default
+        except Exception as e:
+            print(f"[DB] get_app_setting({key}) error: {e}")
+            return default
+
+    def set_app_setting(self, key, value, updated_by="", *, biz_id=None):
+        """app_settings 값 upsert(테넌트별, on_conflict=(biz_id,key))."""
+        biz_id = self._resolve_biz_id(biz_id)
+        try:
+            from datetime import datetime, timezone
+            payload = {
+                "biz_id": biz_id,
+                "key": key,
+                "value": value,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_by": updated_by,
+            }
+            self.client.table("app_settings").upsert(
+                payload, on_conflict="biz_id,key").execute()
+            return True
+        except Exception as e:
+            print(f"[DB] set_app_setting({key}) error: {e}")
+            return False
+
     # ── api_sync_log ──
 
     def insert_api_sync_log(self, payload, *, biz_id=None):

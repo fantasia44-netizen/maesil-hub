@@ -152,6 +152,28 @@ def process_outbound_batch(db, df, location, qty_col, date_str,
 
 # ─── 단건 출고 (폼 기반) ───
 
+# 재고차감 대상이 아닌 비용성 품목 키워드 (운송비/배송비 등).
+#   거래처주문처리 폼에 비용을 품목 행에 넣어도 재고 부족으로 막히지 않도록 방어.
+_NON_STOCK_FEE_KEYWORDS = ('운송비', '배송비', '택배비', '물류비', '운반비', '부대비용')
+
+
+def is_non_stock_item(db, name):
+    """재고차감 대상이 아닌 품목이면 True.
+
+    ① 운송비/배송비 등 비용성 키워드 포함, 또는
+    ② product_costs에서 is_stock_managed=False (드라이아이스/아이스팩 등).
+    """
+    c = canonical(name)
+    if any(kw in c for kw in _NON_STOCK_FEE_KEYWORDS):
+        return True
+    try:
+        from services.stock_service import _get_stock_unmanaged_set
+        unmanaged = _get_stock_unmanaged_set(db)
+        return c in unmanaged or c.replace(' ', '') in unmanaged
+    except Exception:
+        return False
+
+
 def process_single_outbound(db, date_str, location, items, memo=''):
     """폼 기반 단건 출고 처리 (FIFO).
 
@@ -170,9 +192,27 @@ def process_single_outbound(db, date_str, location, items, memo=''):
     shortage = []
     warnings = []
 
+    # ★ 동일 품목(+제조일) 다중 라인 합산.
+    #   라인별로 같은 스냅샷과 비교하면 각 라인이 독립 통과해 재고 초과 차감됨
+    #   (total 2026-07-06 애호3단2p 64재고에 64×2줄 → -64 음수 사고).
+    from collections import OrderedDict
+    _merged = OrderedDict()
+    for item in items:
+        _key = (canonical(item['product_name']),
+                str(item.get('manufacture_date') or '').strip())
+        if _key in _merged:
+            _u = _merged[_key].get('unit', item.get('unit', '개'))
+            _merged[_key]['qty'] = (abs(safe_qty(_merged[_key]['qty'], unit=_u))
+                                    + abs(safe_qty(item['qty'], unit=_u)))
+        else:
+            _merged[_key] = dict(item)
+    items = list(_merged.values())
+
     # 재고 검증 (제조일자 지정 시 해당 배치만 확인)
     for item in items:
         name = canonical(item['product_name'])  # 공백제거 강제
+        if is_non_stock_item(db, name):
+            continue  # 운송비/배송비 등 비재고 품목 — 재고검증 스킵
         mfg = str(item.get('manufacture_date') or '').strip()
         _snap = snapshot_lookup(stock, name)
         u = _snap.get('unit', item.get('unit', '개'))
@@ -209,6 +249,8 @@ def process_single_outbound(db, date_str, location, items, memo=''):
     payload = []
     for item in items:
         name = canonical(item['product_name'])  # 공백제거 강제
+        if is_non_stock_item(db, name):
+            continue  # 운송비/배송비 등 비재고 품목 — 재고차감 스킵
         mfg = str(item.get('manufacture_date') or '').strip()
         _snap = snapshot_lookup(stock, name)
         u = _snap.get('unit', item.get('unit', '개'))
@@ -426,7 +468,8 @@ def _process_revenue_import(db, df, upload_date):
     payload, total_rev = parse_revenue_payload(df, upload_date)
     if not payload:
         return 0, 0
-    db.upsert_revenue(payload)
+    # 출고는 이미 직접 차감됨 → 자동연동 이중차감 방지 (거래처매출/로켓)
+    db.upsert_revenue(payload, skip_auto_stock_categories=['거래처매출', '로켓'])
     return len(payload), total_rev
 
 

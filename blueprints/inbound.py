@@ -217,8 +217,86 @@ def batch():
 @inbound_bp.route('/excel', methods=['POST'])
 @role_required('admin', 'manager', 'logistics', 'production')
 def excel():
-    """입고 엑셀 업로드 — 비활성화 (추후 재구현)"""
-    return jsonify({'error': '엑셀 업로드 기능은 비활성화되었습니다. 추후 재구현 예정입니다.'}), 410
+    """입고 엑셀 업로드 — 비활성화 (excel/preview·excel/apply 로 대체)"""
+    return jsonify({'error': '이 경로는 비활성화되었습니다. 미리보기 기능을 사용하세요.'}), 410
+
+
+# ── 엑셀 다운로드(빈 양식) / 미리보기 / 반영 ──
+
+@inbound_bp.route('/excel/template')
+@role_required('admin', 'manager', 'logistics', 'production')
+def excel_template():
+    """입고 엑셀 빈 양식 다운로드 (+ 품목/창고 참조시트)"""
+    from services.excel_batch_io import build_inbound_template
+    db = get_db()
+    locations = []
+    try:
+        locations, _ = db.query_filter_options()
+    except Exception:
+        pass
+    bio = build_inbound_template(db, locations)
+    return send_file(
+        bio, as_attachment=True,
+        download_name=f'입고등록양식_{today_kst()}.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@inbound_bp.route('/excel/preview', methods=['POST'])
+@role_required('admin', 'manager', 'logistics', 'production')
+def excel_preview():
+    """입고 엑셀 업로드 → 파싱·검증 → 미리보기 JSON (DB 미반영)"""
+    f = request.files.get('file')
+    if not f or not _allowed(f.filename):
+        return jsonify({'ok': False, 'error': '엑셀 파일(.xlsx)을 선택하세요.'}), 400
+    try:
+        from services.excel_batch_io import parse_inbound_excel, validate_inbound_items
+        db = get_db()
+        items, errors, warnings = parse_inbound_excel(f)
+        v_err, v_warn = validate_inbound_items(db, items)
+        errors = errors + v_err
+        warnings = warnings + v_warn
+        return jsonify({
+            'ok': True,
+            'items': items,
+            'errors': errors,
+            'warnings': warnings,
+            'count': len(items),
+            'blocking': len(errors) > 0,
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'엑셀 파싱 오류: {e}'}), 500
+
+
+@inbound_bp.route('/excel/apply', methods=['POST'])
+@role_required('admin', 'manager', 'logistics', 'production')
+def excel_apply():
+    """미리보기 확인된 입고 항목 일괄 반영 (날짜별 그룹 → process_inbound_batch)"""
+    data = request.get_json(silent=True) or {}
+    items = data.get('items', [])
+    if not items:
+        return jsonify({'ok': False, 'error': '반영할 항목이 없습니다.'}), 400
+
+    # 날짜별 그룹핑 (process_inbound_batch 은 단일 날짜)
+    from services.excel_batch_io import group_inbound_for_apply
+    by_date = group_inbound_for_apply(items, today_kst())
+
+    try:
+        from services.inbound_service import process_inbound_batch
+        db = get_db()
+        total = 0
+        warnings = []
+        for d, group in sorted(by_date.items()):
+            res = process_inbound_batch(db, d, group, created_by=current_user.username)
+            total += res.get('count', 0)
+            warnings.extend(res.get('warnings', []))
+        _log_action('excel_inbound',
+                     detail=f'엑셀 입고 반영 {total}건 ({len(by_date)}개 날짜)',
+                     new_value={'count': total, 'dates': sorted(by_date.keys())})
+        return jsonify({'ok': True, 'count': total, 'warnings': warnings})
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'입고 반영 오류: {e}'}), 500
 
 
 # ── 입고일지 PDF ──

@@ -419,8 +419,88 @@ def batch():
 @production_bp.route('/excel', methods=['POST'])
 @role_required('admin', 'manager', 'logistics', 'production')
 def excel_upload():
-    """생산 엑셀 업로드 — 비활성화 (추후 재구현)"""
-    return jsonify({'error': '엑셀 업로드 기능은 비활성화되었습니다. 추후 재구현 예정입니다.'}), 410
+    """생산 엑셀 업로드 — 비활성화 (excel/preview·excel/apply 로 대체)"""
+    return jsonify({'error': '이 경로는 비활성화되었습니다. 미리보기 기능을 사용하세요.'}), 410
+
+
+# ── 엑셀 다운로드(빈 양식) / 미리보기 / 반영 ──
+
+@production_bp.route('/excel/template')
+@role_required('admin', 'manager', 'logistics', 'production')
+def excel_template():
+    """생산 엑셀 빈 양식 다운로드 (평면+생산번호 그룹, +품목/창고 참조시트)"""
+    from services.excel_batch_io import build_production_template
+    db = get_db()
+    locations = []
+    try:
+        locations, _ = db.query_filter_options()
+    except Exception:
+        pass
+    bio = build_production_template(db, locations)
+    return send_file(
+        bio, as_attachment=True,
+        download_name=f'생산등록양식_{today_kst()}.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@production_bp.route('/excel/preview', methods=['POST'])
+@role_required('admin', 'manager', 'logistics', 'production')
+def excel_preview():
+    """생산 엑셀 업로드 → 파싱·검증 → 미리보기 JSON (DB 미반영)"""
+    f = request.files.get('file')
+    if not f or not _allowed(f.filename):
+        return jsonify({'ok': False, 'error': '엑셀 파일(.xlsx)을 선택하세요.'}), 400
+    try:
+        from services.excel_batch_io import parse_production_excel, validate_production_items
+        db = get_db()
+        items, errors, warnings = parse_production_excel(f)
+        v_err, v_warn = validate_production_items(db, items)
+        errors = errors + v_err
+        warnings = warnings + v_warn
+        return jsonify({
+            'ok': True, 'items': items, 'errors': errors,
+            'warnings': warnings, 'count': len(items),
+            'blocking': len(errors) > 0,
+        })
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'엑셀 파싱 오류: {e}'}), 500
+
+
+@production_bp.route('/excel/apply', methods=['POST'])
+@role_required('admin', 'manager', 'logistics', 'production')
+def excel_apply():
+    """미리보기 확인된 생산 항목 반영 ((날짜,위치) 그룹 → process_production_batch)"""
+    data = request.get_json(silent=True) or {}
+    items = data.get('items', [])
+    if not items:
+        return jsonify({'ok': False, 'error': '반영할 항목이 없습니다.'}), 400
+
+    # (날짜, 위치)별 그룹핑 (process_production_batch 은 단일 날짜+위치)
+    from services.excel_batch_io import group_production_for_apply
+    groups = group_production_for_apply(items, today_kst())
+
+    try:
+        from services.production_service import process_production_batch
+        db = get_db()
+        produced = materials_used = 0
+        warnings = []
+        for (d, loc), group in sorted(groups.items()):
+            if not loc:
+                return jsonify({'ok': False, 'error': '생산위치가 비어있는 항목이 있습니다.'}), 400
+            res = process_production_batch(db, d, loc, group, created_by=current_user.username)
+            produced += res.get('produced', 0)
+            materials_used += res.get('materials_used', 0)
+            warnings.extend(res.get('warnings', []))
+        _log_action('excel_production',
+                     detail=f'엑셀 생산 반영 — 산출 {produced}건, 재료차감 {materials_used}건 '
+                            f'({len(groups)}개 날짜·위치)',
+                     new_value={'produced': produced, 'groups': len(groups)})
+        return jsonify({'ok': True, 'produced': produced,
+                        'materials_used': materials_used, 'warnings': warnings})
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'생산 반영 오류: {e}'}), 500
 
 
 # ── 생산일지 PDF ──

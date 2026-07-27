@@ -40,20 +40,18 @@ _cj_clients = {}
 
 
 def _get_cj_client(cust_id_key='A'):
-    """CJ 클라이언트 생성 (A/B 분기).
+    """CJ 클라이언트 생성.
 
-    Args:
-        cust_id_key: 'A' = 넥스원프레시(외부) / 'B' = 넥스원프레시아이스(넥스원출고)
+    ★ 인증(CUST_ID)은 항상 주관고객(CJ_CUST_ID=30494329, 넥스원프레시).
+      B(B133030971, 넥스원프레시아이스)는 '인증 계정'이 아니라 '협력사코드'이므로
+      토큰 발급에 쓰면 실패한다(CJ 전승재 담당 확인, 2026-07). A/B 구분은
+      RegBook의 CUST_MGMT_DLCM_CD(고객관리거래처코드)로만 처리 → _cust_dlcm() 참조.
     """
     global _cj_clients
-    if cust_id_key in _cj_clients:
-        return _cj_clients[cust_id_key]
+    if 'main' in _cj_clients:
+        return _cj_clients['main']
 
-    if cust_id_key == 'B':
-        cust_id = os.getenv('CJ_CUST_ID_B', '')
-    else:
-        cust_id = os.getenv('CJ_CUST_ID', '')
-
+    cust_id = os.getenv('CJ_CUST_ID', '')
     biz_reg = os.getenv('CJ_BIZ_REG_NUM', '')
     use_prod = os.getenv('CJ_USE_PROD', 'false').lower() == 'true'
 
@@ -63,8 +61,19 @@ def _get_cj_client(cust_id_key='A'):
         test_mode=not bool(cust_id),
         use_prod=use_prod,
     )
-    _cj_clients[cust_id_key] = client
+    _cj_clients['main'] = client
     return client
+
+
+def _cust_dlcm(cust_key: str) -> str:
+    """cust_key(A/B) → CJ 고객관리거래처코드(협력사코드).
+
+    A = 넥스원프레시(외부/우리회사 출고) → 주관고객코드(빈값=주관고객 기본)
+    B = 넥스원프레시아이스(넥스원 출고)   → CJ_CUST_ID_B (B133030971)
+    """
+    if cust_key == 'B':
+        return os.getenv('CJ_CUST_ID_B', '')
+    return ''  # 빈값 → register_shipment 가 주관고객코드로 폴백
 
 
 def _split_order_by_cust_key(order: dict) -> list:
@@ -246,6 +255,8 @@ def generate_cj_invoices(db, orders: list, sender: dict = None):
                     invoice_no=invoice_no,
                     order_no=f"{order['order_no']}{suffix}",
                     memo=order.get('memo', '') or product_summary,
+                    dlcm_cd=_cust_dlcm(cust_key),  # 넥스원 출고(B)=협력사코드, 외부(A)=주관고객
+                    fare_type='선불',
                 )
 
                 acct_label = 'A(프레시/외부)' if cust_key == 'A' else 'B(아이스/넥스원)'

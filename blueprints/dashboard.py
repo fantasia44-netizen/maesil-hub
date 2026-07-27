@@ -27,7 +27,10 @@ def dashboard():
         except Exception:
             pass
 
-    return render_template('dashboard.html', pending_users=pending_users)
+    # KPI는 AJAX(/api/dashboard)로 채워짐 — 초기 렌더용 기본값('-')
+    return render_template('dashboard.html', pending_users=pending_users,
+                           today_orders='-', pending_ship='-',
+                           stock_items='-', month_revenue='-')
 
 
 @dashboard_bp.route('/api/dashboard')

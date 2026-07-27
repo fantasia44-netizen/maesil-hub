@@ -121,6 +121,27 @@ def settlement():
     return render_template('revenue/settlement.html')
 
 
+@revenue_bp.route('/api/settlement')
+@role_required('admin', 'ceo', 'manager', 'sales', 'general')
+def api_settlement():
+    """정산 기준 매출 집계 JSON.
+
+    Query: month=YYYY-MM (기본: 당월)
+    반환: {channels[], daily[], daily_by_channel{}, total{}}
+    """
+    month = (request.args.get('month') or today_kst()[:7]).strip()
+    db = get_db()
+    maesil_sb, maesil_op_id = _get_maesil()
+    try:
+        from services.revenue_settlement_service import build_settlement_revenue
+        result = build_settlement_revenue(
+            db, month, maesil_sb=maesil_sb, maesil_op_id=maesil_op_id)
+        return jsonify(result)
+    except Exception as e:
+        current_app.logger.error(f'[정산매출] {month} 집계 오류: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
 @revenue_bp.route('/import', methods=['POST'])
 @role_required('admin', 'ceo', 'manager', 'sales', 'general')
 def import_revenue():

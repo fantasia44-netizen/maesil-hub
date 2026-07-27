@@ -15,6 +15,18 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 
+def _g_biz_id():
+    """요청 컨텍스트에서 g.biz_id 조회 (스레드/스케줄러에선 None).
+    ThreadPool 워커는 app context 없음 → 호출부에서 명시 전달 필요."""
+    try:
+        from flask import g, has_app_context
+        if has_app_context():
+            return getattr(g, 'biz_id', None)
+    except Exception:
+        pass
+    return None
+
+
 def _month_range(year_month):
     """'2026-03' -> ('2026-03-01', '2026-03-31') 반환."""
     parts = year_month.split('-')
@@ -224,7 +236,7 @@ def _calc_sga(db, year_month, commission_total):
 #  v2: 정산서/세금계산서 기반 집계
 # ──────────────────────────────────────────────
 
-def _fetch_month_data(db, date_from, date_to, year_month, maesil_sb=None, maesil_op_id=None):
+def _fetch_month_data(db, date_from, date_to, year_month, maesil_sb=None, maesil_op_id=None, biz_id=None):
     """한 달치 데이터 일괄 조회 — SQL RPC 1회 (Phase 1 OOM 차단).
 
     maesil_sb 가 주어지면 Maesil Insight DB의 api_settlements를 병합.
@@ -245,6 +257,7 @@ def _fetch_month_data(db, date_from, date_to, year_month, maesil_sb=None, maesil
             'p_date_from': date_from,
             'p_date_to': date_to,
             'p_year_month': year_month,
+            'p_biz_id': biz_id if biz_id is not None else _g_biz_id(),
         }).execute()
         agg = res.data or {}
         if isinstance(agg, list):
@@ -610,7 +623,7 @@ def _calc_sga_v2(data, commission_from_revenue):
 #  월별 손익 계산 (메인)
 # ──────────────────────────────────────────────
 
-def calculate_monthly_pnl(db, year_month, maesil_sb=None, maesil_op_id=None):
+def calculate_monthly_pnl(db, year_month, maesil_sb=None, maesil_op_id=None, biz_id=None):
     """관리 손익표 월별 계산 (v2: 정산서/세금계산서 우선).
 
     Args:
@@ -618,15 +631,18 @@ def calculate_monthly_pnl(db, year_month, maesil_sb=None, maesil_op_id=None):
         year_month: '2026-03' 형식
         maesil_sb: Maesil Insight Supabase 클라이언트 (선택, 없으면 maesil-total DB만 사용)
         maesil_op_id: Maesil operator_id (maesil_sb 있을 때 필요)
+        biz_id: 테넌트 격리용 (None이면 요청 g에서 자동 — 스레드는 명시 필요)
 
     Returns:
         dict: 손익표 전체 데이터
     """
+    if biz_id is None:
+        biz_id = _g_biz_id()
     date_from, date_to = _month_range(year_month)
 
     # 0. 한 달치 데이터 일괄 조회
     data = _fetch_month_data(db, date_from, date_to, year_month,
-                             maesil_sb=maesil_sb, maesil_op_id=maesil_op_id)
+                             maesil_sb=maesil_sb, maesil_op_id=maesil_op_id, biz_id=biz_id)
 
     # 1. 매출 (v2: 정산서 + 세금계산서)
     revenue = _calc_revenue_v2(db, date_from, date_to, data)
@@ -655,7 +671,7 @@ def calculate_monthly_pnl(db, year_month, maesil_sb=None, maesil_op_id=None):
     # 7. 전월 비교
     prev_ym = _prev_month(year_month)
     prev_pnl = _calc_prev_month_summary(db, prev_ym,
-                                        maesil_sb=maesil_sb, maesil_op_id=maesil_op_id)
+                                        maesil_sb=maesil_sb, maesil_op_id=maesil_op_id, biz_id=biz_id)
     prev_month_comparison = {
         'revenue_change': _change_pct(revenue['total'], prev_pnl.get('revenue', 0)),
         'profit_change': _change_pct(operating_profit, prev_pnl.get('operating_profit', 0)),
@@ -692,12 +708,12 @@ def calculate_monthly_pnl(db, year_month, maesil_sb=None, maesil_op_id=None):
     }
 
 
-def _calc_prev_month_summary(db, prev_ym, maesil_sb=None, maesil_op_id=None):
+def _calc_prev_month_summary(db, prev_ym, maesil_sb=None, maesil_op_id=None, biz_id=None):
     """전월 요약 (비교용). v2 사용."""
     try:
         date_from, date_to = _month_range(prev_ym)
         data = _fetch_month_data(db, date_from, date_to, prev_ym,
-                                 maesil_sb=maesil_sb, maesil_op_id=maesil_op_id)
+                                 maesil_sb=maesil_sb, maesil_op_id=maesil_op_id, biz_id=biz_id)
         revenue = _calc_revenue_v2(db, date_from, date_to, data)
         cogs = _calc_cogs_v2(db, date_from, date_to, data, revenue.get('total_qty', 0))
         gross_profit = revenue['total'] - cogs['total']
@@ -718,15 +734,17 @@ def _calc_prev_month_summary(db, prev_ym, maesil_sb=None, maesil_op_id=None):
 #  채널별 손익
 # ──────────────────────────────────────────────
 
-def calculate_channel_pnl(db, year_month, maesil_sb=None, maesil_op_id=None):
+def calculate_channel_pnl(db, year_month, maesil_sb=None, maesil_op_id=None, biz_id=None):
     """채널별 손익 분석 (v2: api_settlements 우선).
 
     각 채널별로:
       매출 - 수수료 - 광고비 = 채널 기여이익
     """
+    if biz_id is None:
+        biz_id = _g_biz_id()
     date_from, date_to = _month_range(year_month)
     data = _fetch_month_data(db, date_from, date_to, year_month,
-                             maesil_sb=maesil_sb, maesil_op_id=maesil_op_id)
+                             maesil_sb=maesil_sb, maesil_op_id=maesil_op_id, biz_id=biz_id)
 
     agg = data.get('_rpc')
     if agg:
@@ -868,17 +886,18 @@ def calculate_channel_pnl(db, year_month, maesil_sb=None, maesil_op_id=None):
 #  월별 추이 (최근 N개월)
 # ──────────────────────────────────────────────
 
-def _pnl_trend_worker(db, ym, maesil_sb=None, maesil_op_id=None):
-    """단일 월 PnL 계산 (병렬 워커)."""
+def _pnl_trend_worker(db, ym, maesil_sb=None, maesil_op_id=None, biz_id=None):
+    """단일 월 PnL 계산 (병렬 워커). biz_id 명시 전달 — 스레드는 g 접근 불가."""
     try:
         return (ym, calculate_monthly_pnl(db, ym,
                                           maesil_sb=maesil_sb,
-                                          maesil_op_id=maesil_op_id), None)
+                                          maesil_op_id=maesil_op_id,
+                                          biz_id=biz_id), None)
     except Exception as e:
         return (ym, None, e)
 
 
-def calculate_pnl_trend(db, months=6, maesil_sb=None, maesil_op_id=None):
+def calculate_pnl_trend(db, months=6, maesil_sb=None, maesil_op_id=None, biz_id=None):
     """최근 N개월 손익 추이.
 
     Args:
@@ -898,6 +917,10 @@ def calculate_pnl_trend(db, months=6, maesil_sb=None, maesil_op_id=None):
         }
     """
     from services.tz_utils import today_kst
+
+    # biz_id를 요청 컨텍스트에서 미리 캡처 (ThreadPool 워커는 g 접근 불가)
+    if biz_id is None:
+        biz_id = _g_biz_id()
 
     today = today_kst()
     current = datetime.strptime(today, '%Y-%m-%d')
@@ -931,7 +954,7 @@ def calculate_pnl_trend(db, months=6, maesil_sb=None, maesil_op_id=None):
     pnl_by_ym = {}
     with ThreadPoolExecutor(max_workers=min(months, 6)) as pool:
         futures = [pool.submit(_pnl_trend_worker, db, ym,
-                               maesil_sb, maesil_op_id) for ym in target_yms]
+                               maesil_sb, maesil_op_id, biz_id) for ym in target_yms]
         for f in futures:
             ym, pnl, err = f.result()
             if err:

@@ -669,13 +669,14 @@ def purchase_order():
             date_to=date_to or None,
             partner_name=partner_filter if partner_filter != '전체' else None,
         )
-        # items가 JSON 문자열이면 파싱
+        # items가 JSON 문자열이면 파싱 + 품목수(item_count) 계산 (템플릿 합계용)
         for po in po_list:
             if isinstance(po.get('items'), str):
                 try:
                     po['items'] = json.loads(po['items'])
                 except (json.JSONDecodeError, TypeError):
                     po['items'] = []
+            po['item_count'] = len(po.get('items') or [])
     except Exception as e:
         flash(f'발주서 이력 조회 중 오류: {e}', 'danger')
 

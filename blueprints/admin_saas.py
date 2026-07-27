@@ -729,6 +729,33 @@ def api_health():
     """서버 + DB 통합 상태 (대시보드 폴링용). 항상 JSON 반환."""
     import os as _os
     import time as _time
+    import threading as _threading
+
+    def _proc_stats():
+        """psutil 없이 Linux /proc 기반 프로세스 통계 (Render=Linux)."""
+        out = {'status': 'ok', 'pid': _os.getpid(),
+               'num_threads': _threading.active_count()}
+        # 메모리 (VmRSS) + 스레드 수
+        try:
+            with open(f'/proc/{_os.getpid()}/status') as f:
+                for ln in f:
+                    if ln.startswith('VmRSS:'):
+                        out['memory_mb'] = round(int(ln.split()[1]) / 1024, 1)  # kB→MB
+                    elif ln.startswith('Threads:'):
+                        out['num_threads'] = int(ln.split()[1])
+        except Exception:
+            pass
+        # 업타임 = 시스템업타임 - 프로세스시작(clock ticks)
+        try:
+            clk = _os.sysconf('SC_CLK_TCK')
+            with open(f'/proc/{_os.getpid()}/stat') as f:
+                starttime = int(f.read().split()[21])
+            with open('/proc/uptime') as f:
+                sys_up = float(f.read().split()[0])
+            out['uptime_seconds'] = int(sys_up - starttime / clk)
+        except Exception:
+            pass
+        return out
 
     web = {}
     try:
@@ -743,7 +770,7 @@ def api_health():
             'uptime_seconds': int(_time.time() - p.create_time()),
         }
     except ImportError:
-        web = {'status': 'ok', 'note': 'psutil 미설치'}
+        web = _proc_stats()   # psutil 없으면 /proc 폴백
     except Exception as e:
         web = {'status': 'error', 'error': str(e)[:150]}
 

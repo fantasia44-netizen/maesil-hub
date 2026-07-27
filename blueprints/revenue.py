@@ -81,6 +81,17 @@ def index():
     except Exception as e:
         flash(f'매출 조회 중 오류: {e}', 'danger')
 
+    # 정산 기준 P&L 요약 (서버렌더 — 배너 즉시표시, JS 의존 제거)
+    settle = None
+    settle_month = (date_to or date_from or today_kst())[:7]
+    try:
+        from services.revenue_settlement_service import build_settlement_revenue
+        maesil_sb, maesil_op_id = _get_maesil()
+        settle = build_settlement_revenue(
+            db, settle_month, maesil_sb=maesil_sb, maesil_op_id=maesil_op_id)
+    except Exception as _e:
+        current_app.logger.warning(f'[매출관리] 정산요약 실패: {_e}')
+
     return render_template('revenue/index.html',
                            revenues=data,
                            total_revenue=total_revenue,
@@ -88,7 +99,26 @@ def index():
                            total_commission=total_commission,
                            date_from=date_from, date_to=date_to,
                            category=category,
+                           settle=settle, settle_month=settle_month,
                            categories=REVENUE_CATEGORIES)
+
+
+def _get_maesil():
+    """Maesil Insight 브릿지 클라이언트 + operator_id 반환 (없으면 None).
+    D2: insight는 total과 동일하게 글로벌 env operator_id 사용(테넌트별 매핑은 후속)."""
+    maesil_sb = getattr(current_app, 'maesil_sb', None)
+    maesil_op_id = None
+    if maesil_sb:
+        from services.maesil_bridge import get_maesil_operator_id
+        maesil_op_id = get_maesil_operator_id()
+    return maesil_sb, maesil_op_id
+
+
+@revenue_bp.route('/settlement')
+@role_required('admin', 'ceo', 'manager', 'sales', 'general')
+def settlement():
+    """정산 기준 매출관리 화면 (insight 정산 + total 추가채널 + 거래처, 중복제거)."""
+    return render_template('revenue/settlement.html')
 
 
 @revenue_bp.route('/import', methods=['POST'])

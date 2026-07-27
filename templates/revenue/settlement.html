@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}정산 매출 - 배마마 통합시스템{% endblock %}
+{% block page_title %}정산 매출{% endblock %}
+
+{% block content %}
+<!-- 탭 -->
+<ul class="nav nav-tabs mb-4">
+    <li class="nav-item">
+        <a class="nav-link" href="{{ url_for('revenue.index') }}"><i class="bi bi-currency-won"></i> 매출 관리</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link" href="{{ url_for('revenue.stats') }}"><i class="bi bi-bar-chart-line"></i> 매출 통계</a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link active" href="{{ url_for('revenue.settlement') }}"><i class="bi bi-receipt"></i> 정산 매출</a>
+    </li>
+</ul>
+
+<!-- 월 선택 -->
+<div class="card mb-3">
+    <div class="card-body d-flex flex-wrap gap-2 align-items-end">
+        <div>
+            <label class="form-label fw-semibold mb-1"><i class="bi bi-calendar-month"></i> 정산월</label>
+            <input type="month" id="settleMonth" class="form-control" style="width:170px">
+        </div>
+        <button id="btnLoad" class="btn btn-primary"><i class="bi bi-search"></i> 조회</button>
+        <span class="text-muted small ms-2">insight 정산 + 거래처/추가채널 (중복 자동제거)</span>
+        <div class="ms-auto text-muted small" id="loadInfo"></div>
+    </div>
+</div>
+
+<!-- KPI -->
+<div class="row g-3 mb-3" id="kpiRow" style="display:none">
+    <div class="col-6 col-md-3"><div class="card border-primary"><div class="card-body text-center py-3">
+        <div class="text-muted small">총매출</div><div class="fs-5 fw-bold text-primary" id="kpiRevenue">-</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="card border-success"><div class="card-body text-center py-3">
+        <div class="text-muted small">순매출 <span class="text-info" id="kpiRate"></span></div>
+        <div class="fs-5 fw-bold text-success" id="kpiNet">-</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="card border-warning"><div class="card-body text-center py-3">
+        <div class="text-muted small">광고비</div><div class="fs-5 fw-bold text-warning" id="kpiAd">-</div></div></div></div>
+    <div class="col-6 col-md-3"><div class="card border-info"><div class="card-body text-center py-3">
+        <div class="text-muted small">순정산 <span class="text-secondary" id="kpiOpRate"></span></div>
+        <div class="fs-5 fw-bold text-info" id="kpiOp">-</div></div></div></div>
+</div>
+
+<!-- 보기 토글 -->
+<ul class="nav nav-pills mb-3" id="viewTabs" style="display:none">
+    <li class="nav-item"><a class="nav-link active" data-view="summary" href="#"><i class="bi bi-table"></i> 채널별 요약</a></li>
+    <li class="nav-item"><a class="nav-link" data-view="daily" href="#"><i class="bi bi-graph-up"></i> 일자별 추이</a></li>
+</ul>
+
+<!-- 채널별 요약 -->
+<div class="card" id="summaryCard" style="display:none">
+    <div class="card-header"><i class="bi bi-receipt"></i> 채널별 정산 요약 (월)</div>
+    <div class="card-body p-0"><div class="table-responsive">
+        <table class="table table-hover table-sm mb-0 align-middle">
+            <thead class="table-light"><tr>
+                <th>채널</th><th class="text-center">출처</th>
+                <th class="text-end">주문건수</th><th class="text-end">매출</th>
+                <th class="text-end">취소</th><th class="text-end">수수료</th><th class="text-end">차감</th>
+                <th class="text-end">순매출</th><th class="text-end">순매출률</th>
+                <th class="text-end">광고비</th><th class="text-end">순정산</th>
+            </tr></thead>
+            <tbody id="summaryBody"></tbody>
+            <tfoot class="table-light fw-bold" id="summaryFoot"></tfoot>
+        </table>
+    </div></div>
+</div>
+
+<!-- 일자별 추이 -->
+<div id="dailyCard" style="display:none">
+    <div class="card mb-3"><div class="card-header"><i class="bi bi-graph-up"></i> 일자별 매출 추이 (판매일 기준)</div>
+        <div class="card-body"><canvas id="dailyChart" style="max-height:320px"></canvas></div>
+    </div>
+    <div class="card"><div class="card-header"><i class="bi bi-calendar-week"></i> 일자별 매출</div>
+        <div class="card-body p-0"><div class="table-responsive" style="max-height:360px;overflow:auto">
+            <table class="table table-sm table-hover mb-0">
+                <thead class="table-light"><tr><th>일자</th><th class="text-end">매출</th></tr></thead>
+                <tbody id="dailyBody"></tbody>
+            </table>
+        </div></div>
+    </div>
+</div>
+
+<div class="alert alert-danger mt-3" id="errBox" style="display:none"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
+<script>
+const fmt = n => (n||0).toLocaleString('ko-KR');
+const srcBadge = s => ({'정산':'success','추가':'secondary','거래처':'info'}[s]||'light');
+let dailyChartObj = null;
+
+function showView(v){
+    document.querySelectorAll('#viewTabs .nav-link').forEach(a=>a.classList.toggle('active', a.dataset.view===v));
+    document.getElementById('summaryCard').style.display = v==='summary' ? '' : 'none';
+    document.getElementById('dailyCard').style.display   = v==='daily'   ? '' : 'none';
+}
+
+async function load(){
+    const month = document.getElementById('settleMonth').value;
+    if(!month) return;
+    const info = document.getElementById('loadInfo');
+    const err = document.getElementById('errBox');
+    err.style.display='none'; info.textContent='불러오는 중...';
+    try{
+        const res = await fetch(`{{ url_for('revenue.api_settlement') }}?month=${month}`);
+        const d = await res.json();
+        if(d.error){ throw new Error(d.error); }
+        render(d);
+        info.textContent = `${d.channels.length}개 채널 / ${d.daily.length}일`;
+    }catch(e){
+        info.textContent='';
+        err.textContent = '조회 실패: ' + e.message; err.style.display='';
+    }
+}
+
+function render(d){
+    const t = d.total;
+    document.getElementById('kpiRow').style.display='';
+    document.getElementById('viewTabs').style.display='';
+    const opNeg = (t['순정산']||0) < 0;
+    document.getElementById('kpiRevenue').textContent = fmt(t['매출'])+'원';
+    document.getElementById('kpiNet').textContent     = fmt(t['순매출'])+'원';
+    document.getElementById('kpiRate').textContent    = '('+(t['순매출률']||0)+'%)';
+    document.getElementById('kpiAd').textContent      = fmt(t['광고비'])+'원';
+    document.getElementById('kpiOp').textContent      = fmt(t['순정산'])+'원';
+    document.getElementById('kpiOpRate').textContent  = '('+(t['순정산율']||0)+'%)';
+
+    // 채널별 요약
+    const tb = document.getElementById('summaryBody'); tb.innerHTML='';
+    d.channels.forEach(c=>{
+        const oneg = (c['순정산']||0) < 0;
+        tb.insertAdjacentHTML('beforeend', `<tr>
+            <td class="fw-semibold">${c.channel}</td>
+            <td class="text-center"><span class="badge bg-${srcBadge(c.source)}">${c.source}</span></td>
+            <td class="text-end">${fmt(c['주문건수'])}</td>
+            <td class="text-end fw-bold">${fmt(c['매출'])}</td>
+            <td class="text-end text-danger">${c['취소']?'-'+fmt(c['취소']):'0'}</td>
+            <td class="text-end text-warning">${fmt(c['수수료'])}</td>
+            <td class="text-end text-secondary">${fmt(c['차감'])}</td>
+            <td class="text-end text-success fw-bold">${fmt(c['순매출'])}</td>
+            <td class="text-end">${c['순매출률']}%</td>
+            <td class="text-end text-danger">${c['광고비']?'-'+fmt(c['광고비']):'0'}</td>
+            <td class="text-end fw-bold ${oneg?'text-danger':'text-info'}">${fmt(c['순정산'])}</td></tr>`);
+    });
+    document.getElementById('summaryFoot').innerHTML = `<tr>
+        <td colspan="2">합계</td><td class="text-end">${fmt(t['주문건수'])}</td>
+        <td class="text-end">${fmt(t['매출'])}</td>
+        <td class="text-end text-danger">-${fmt(t['취소'])}</td>
+        <td class="text-end text-warning">${fmt(t['수수료'])}</td>
+        <td class="text-end text-secondary">${fmt(t['차감'])}</td>
+        <td class="text-end text-success">${fmt(t['순매출'])}</td><td class="text-end">${t['순매출률']}%</td>
+        <td class="text-end text-danger">-${fmt(t['광고비'])}</td>
+        <td class="text-end text-info">${fmt(t['순정산'])}</td></tr>`;
+
+    // 일자별
+    const db = document.getElementById('dailyBody'); db.innerHTML='';
+    d.daily.forEach(x=> db.insertAdjacentHTML('beforeend',
+        `<tr><td>${x.date}</td><td class="text-end">${fmt(x['매출'])}</td></tr>`));
+    const labels = d.daily.map(x=>x.date.slice(5));
+    const vals   = d.daily.map(x=>x['매출']);
+    if(dailyChartObj) dailyChartObj.destroy();
+    dailyChartObj = new Chart(document.getElementById('dailyChart'), {
+        type:'line',
+        data:{ labels, datasets:[{ label:'매출', data:vals, borderColor:'#0d6efd',
+                backgroundColor:'rgba(13,110,253,.1)', fill:true, tension:.3, pointRadius:2 }]},
+        options:{ responsive:true, plugins:{legend:{display:false}},
+                  scales:{ y:{ ticks:{ callback:v=>(v/10000).toLocaleString()+'만' }}}}
+    });
+    showView('summary');
+}
+
+document.getElementById('btnLoad').addEventListener('click', load);
+document.querySelectorAll('#viewTabs .nav-link').forEach(a=>
+    a.addEventListener('click', e=>{ e.preventDefault(); showView(a.dataset.view); }));
+// 기본: 당월
+(function(){
+    const now = new Date();
+    document.getElementById('settleMonth').value = now.toISOString().slice(0,7);
+    load();
+})();
+</script>
+{% endblock %}

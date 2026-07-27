@@ -107,7 +107,7 @@ def explode_bom(bom_lookup, set_name, channel, multiplier=1, _visited=None):
 
 def process_set_assembly(db, date_str, set_name, channel, location, qty,
                          sub_materials=None, storage_method_override=None,
-                         food_type=None, created_by=None):
+                         food_type=None, created_by=None, dry_run=False):
     """세트작업 처리 메인 함수.
 
     Args:
@@ -196,6 +196,11 @@ def process_set_assembly(db, date_str, set_name, channel, location, qty,
         return {'success': False,
                 'warnings': ['재고 부족으로 세트작업을 진행할 수 없습니다.'],
                 'shortage': shortage,
+                'set_out_count': 0, 'set_in_count': 0, 'sub_out_count': 0}
+
+    if dry_run:
+        # 사전 재고체크만 — 실제 차감/산출 없이 부족여부만 반환
+        return {'success': True, 'shortage': [], 'warnings': [],
                 'set_out_count': 0, 'set_in_count': 0, 'sub_out_count': 0}
 
     # 5. FIFO 차감 (SET_OUT) + 세트 산출 (SET_IN) payload 생성

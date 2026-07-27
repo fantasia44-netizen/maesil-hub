@@ -319,6 +319,101 @@ def delete():
     return redirect(url_for('set_assembly.index'))
 
 
+@set_assembly_bp.route('/api/check', methods=['POST'])
+@role_required('admin', 'manager', 'sales', 'logistics', 'production', 'general')
+def api_check():
+    """세트작업 실행 전 재고 부족 사전 체크 API"""
+    data = request.get_json(silent=True) or {}
+    set_name = data.get('set_name', '').strip()
+    channel = data.get('channel', '').strip()
+    location = data.get('location', '').strip()
+    qty = int(data.get('qty', 1) or 1)
+    sub_materials = data.get('sub_materials', [])
+
+    if not set_name or not channel or not location:
+        return jsonify({'ok': True, 'shortages': []})
+
+    try:
+        from services.set_assembly_service import process_set_assembly
+        result = process_set_assembly(
+            get_db(), '2000-01-01', set_name, channel, location, qty,
+            sub_materials=sub_materials, dry_run=True)
+        shortages = result.get('shortage', [])
+        return jsonify({'ok': len(shortages) == 0, 'shortages': shortages})
+    except Exception as e:
+        return jsonify({'ok': True, 'shortages': [], 'error': str(e)})
+
+
+@set_assembly_bp.route('/api/bom')
+@role_required('admin', 'manager', 'production')
+def api_bom_list():
+    """BOM 마스터 전체 조회"""
+    try:
+        rows = get_db().query_bom_master_all()
+        rows.sort(key=lambda r: (r.get('channel', ''), r.get('set_name', '')))
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@set_assembly_bp.route('/api/bom/save', methods=['POST'])
+@role_required('admin', 'manager', 'production')
+def api_bom_save():
+    """BOM 마스터 등록/수정. components: [{name, qty}, ...]"""
+    data = request.get_json(silent=True) or {}
+    channel = str(data.get('channel', '')).strip()
+    set_name = str(data.get('set_name', '')).strip()
+    components = data.get('components', [])
+
+    if not channel or not set_name:
+        return jsonify({'error': '채널과 세트명을 입력하세요.'}), 400
+    if not components:
+        return jsonify({'error': '구성품을 1개 이상 입력하세요.'}), 400
+
+    valid = [(c['name'].strip(), int(c.get('qty', 1))) for c in components
+             if c.get('name', '').strip() and int(c.get('qty', 1)) > 0]
+    if not valid:
+        return jsonify({'error': '유효한 구성품이 없습니다.'}), 400
+
+    comp_str = ','.join(f'{name}x{qty}' for name, qty in valid)
+    try:
+        get_db().upsert_bom_master(channel, set_name, comp_str)
+        _log_action('bom_upsert', target=f'{channel}/{set_name}',
+                    new_value={'components': comp_str})
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@set_assembly_bp.route('/api/bom/delete', methods=['POST'])
+@role_required('admin', 'manager')
+def api_bom_delete():
+    """BOM 마스터 삭제"""
+    data = request.get_json(silent=True) or {}
+    channel = str(data.get('channel', '')).strip()
+    set_name = str(data.get('set_name', '')).strip()
+
+    if not channel or not set_name:
+        return jsonify({'error': '채널과 세트명이 필요합니다.'}), 400
+    try:
+        get_db().delete_bom_master(channel, set_name)
+        _log_action('bom_delete', target=f'{channel}/{set_name}')
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@set_assembly_bp.route('/api/all-products')
+@role_required('admin', 'manager', 'sales', 'logistics', 'production', 'general')
+def api_all_products():
+    """product_costs 전체 품목명 반환 (BOM 구성품 선택용)"""
+    try:
+        cost_map = get_db().query_product_costs() or {}
+        return jsonify(sorted(cost_map.keys()))
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @set_assembly_bp.route('/export')
 @role_required('admin', 'manager', 'sales', 'logistics', 'production', 'general')
 def export():

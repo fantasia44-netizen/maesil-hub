@@ -3389,6 +3389,39 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_bom_master_all error: {e}")
             return []
 
+    def upsert_bom_master(self, channel, set_name, components, *, biz_id=None):
+        """BOM 마스터 등록/수정. components: '품목x수량,품목x수량' 형식 문자열.
+        ★존재확인/insert에 biz_id 포함 — 누락 시 타 테넌트 BOM 덮어쓰기."""
+        biz_id = self._resolve_biz_id(biz_id)
+        try:
+            q = self.client.table("bom_master").select("id") \
+                .eq("channel", channel).eq("set_name", set_name)
+            existing = self._with_biz(q, biz_id).limit(1).execute()
+            if existing.data:
+                uq = self.client.table("bom_master").update({"components": components}) \
+                    .eq("channel", channel).eq("set_name", set_name)
+                self._with_biz(uq, biz_id).execute()
+            else:
+                self.client.table("bom_master").insert(self._inject_biz_id({
+                    "channel": channel,
+                    "set_name": set_name,
+                    "components": components,
+                }, biz_id)).execute()
+        except Exception as e:
+            print(f"[DB] upsert_bom_master error: {e}")
+            raise
+
+    def delete_bom_master(self, channel, set_name, *, biz_id=None):
+        """BOM 마스터 삭제. biz_id 필터로 자기 테넌트 것만 삭제."""
+        biz_id = self._resolve_biz_id(biz_id)
+        try:
+            dq = self.client.table("bom_master").delete() \
+                .eq("channel", channel).eq("set_name", set_name)
+            self._with_biz(dq, biz_id).execute()
+        except Exception as e:
+            print(f"[DB] delete_bom_master error: {e}")
+            raise
+
     # ================================================================
     # 실시간 주문처리: 추가 메서드
     # ================================================================

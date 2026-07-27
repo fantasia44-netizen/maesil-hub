@@ -249,23 +249,57 @@ def api_products():
     if not location:
         return jsonify([])
     try:
-        from services.excel_io import build_stock_snapshot
-        all_data = get_db().query_stock_by_location(location)
-        snapshot = build_stock_snapshot(all_data)
-        products = []
-        for name, info in snapshot.items():
-            if info['total'] > 0:
-                mfg_dates = sorted(set(
-                    str(g.get('manufacture_date', '')).strip()
-                    for g in info.get('groups', [])
-                    if g.get('qty', 0) > 0 and str(g.get('manufacture_date', '')).strip()
-                ))
-                products.append({
-                    'name': name,
-                    'qty': info['total'],
-                    'unit': info.get('unit', '개'),
-                    'mfg_dates': mfg_dates,
-                })
+        products = None
+        # ── RPC 우선: 서버 GROUP BY 1회 왕복 (행 풀스캔은 큰 창고 20초+, total 22.8s 사고).
+        #    hub RPC는 (DATE,TEXT,BIGINT) — p_biz_id로 테넌트 격리 ──
+        rpc_params = {'p_date_to': today_kst(), 'p_split_mode': 'manufacture'}
+        if getattr(g, 'biz_id', None):
+            rpc_params['p_biz_id'] = g.biz_id
+        try:
+            res = get_db().client.rpc('get_stock_snapshot_agg', rpc_params).execute()
+            rpc_rows = res.data if isinstance(res.data, list) else None
+        except Exception as _rpc_err:
+            print(f"[transfer.api_products] RPC 폴백: {_rpc_err}")
+            rpc_rows = None
+        if rpc_rows is not None:
+            agg = {}
+            for r in rpc_rows:
+                if (r.get('location') or '') != location:
+                    continue
+                name = r.get('product_name') or ''
+                if not name:
+                    continue
+                q = float(r.get('qty') or 0)
+                a = agg.setdefault(name, {'qty': 0.0, 'unit': r.get('unit') or '개',
+                                          'mfg': set()})
+                a['qty'] += q
+                mfg = (r.get('manufacture_date') or '').strip()
+                if q > 0 and mfg:
+                    a['mfg'].add(mfg)
+            products = [
+                {'name': n, 'qty': a['qty'], 'unit': a['unit'],
+                 'mfg_dates': sorted(a['mfg'])}
+                for n, a in agg.items() if a['qty'] > 0
+            ]
+        # ── 폴백: 행 스캔 (RPC 실패 시) ──
+        if products is None:
+            from services.excel_io import build_stock_snapshot
+            all_data = get_db().query_stock_by_location(location)
+            snapshot = build_stock_snapshot(all_data)
+            products = []
+            for name, info in snapshot.items():
+                if info['total'] > 0:
+                    mfg_dates = sorted(set(
+                        str(grp.get('manufacture_date', '')).strip()
+                        for grp in info.get('groups', [])
+                        if grp.get('qty', 0) > 0 and str(grp.get('manufacture_date', '')).strip()
+                    ))
+                    products.append({
+                        'name': name,
+                        'qty': info['total'],
+                        'unit': info.get('unit', '개'),
+                        'mfg_dates': mfg_dates,
+                    })
         products.sort(key=lambda x: x['name'])
         return jsonify(products)
     except Exception as e:

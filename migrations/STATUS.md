@@ -27,3 +27,6 @@
 - 025_order_shipping_fee.sql — development — 2026-07-28 00:20
 - 026_system_notices.sql — development — 2026-07-28 01:10
 - 027_pnl_monthly_agg_nested.sql — development — 2026-07-28 02:00
+- 028_missing_master_tables.sql — development — 2026-07-28 20:00
+- 029_bank_expense_dependents.sql — development — 2026-07-28 20:05
+- 030_pnl_agg_with_tax_expenses.sql — development — 2026-07-28 20:10

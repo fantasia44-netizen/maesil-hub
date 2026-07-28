@@ -149,21 +149,17 @@
     <div class="menu-label">구매 · 거래처</div>
     <a class="nav-link {% if request.path.startswith('/trade') %}active{% endif %}"
        href="/trade/"><i class="bi bi-cart3"></i> 발주관리</a>
-    {# BLIND(테이블 미생성·미사용) — 재노출 시 주석 제거
     <a class="nav-link {% if request.path.startswith('/tax-invoice') %}active{% endif %}"
        href="/tax-invoice/"><i class="bi bi-receipt"></i> 세금계산서</a>
-    #}
 
     <!-- 회계 -->
     <div class="menu-label">회계 · 재무</div>
     <a class="nav-link {% if request.path.startswith('/accounting') %}active{% endif %}"
        href="/accounting/"><i class="bi bi-bank"></i> 회계</a>
-    {# BLIND(테이블 미생성·미사용) — 재노출 시 주석 제거
     <a class="nav-link {% if request.path.startswith('/finance') %}active{% endif %}"
        href="/finance/dashboard"><i class="bi bi-currency-exchange"></i> 재무현황</a>
     <a class="nav-link {% if request.path.startswith('/bank') %}active{% endif %}"
        href="/bank/"><i class="bi bi-credit-card"></i> 입출금</a>
-    #}
     <a class="nav-link {% if request.path.startswith('/journal') %}active{% endif %}"
        href="/journal/"><i class="bi bi-book"></i> 분개장</a>
 
@@ -178,14 +174,14 @@
 
     <!-- 설정 -->
     <div class="menu-label">설정</div>
-    {# BLIND(테이블 미생성·미사용) — 재노출 시 주석 제거
+    {# BLIND(master_products 미존재 — total에도 없음) — 재노출 시 주석 제거
     <a class="nav-link {% if request.path.startswith('/master') %}active{% endif %}"
        href="/master/"><i class="bi bi-tags"></i> 상품마스터</a>
+    #}
     <a class="nav-link {% if request.path.startswith('/bom-cost') %}active{% endif %}"
        href="/bom-cost/"><i class="bi bi-diagram-3"></i> BOM/원가</a>
     <a class="nav-link {% if request.path.startswith('/price') %}active{% endif %}"
        href="/price/"><i class="bi bi-tag"></i> 가격관리</a>
-    #}
     <a class="nav-link {% if request.path.startswith('/base-data') %}active{% endif %}"
        href="/base-data/"><i class="bi bi-database"></i> 기초데이터</a>
     <a class="nav-link {% if request.path.startswith('/settings/team') %}active{% endif %}"

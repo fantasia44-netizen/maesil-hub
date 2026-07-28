@@ -1138,10 +1138,9 @@ class OrderProcessor:
                         'result_status': 'success' if result.get('success') else ('error' if result.get('error') else 'partial'),
                         'total_count': _total or len(result.get('files', [])),
                         'success_count': _success,
-                        'error_count': _errors,
+                        'failed_count': _errors,   # hub work_logs 컬럼명 (error_count 아님)
                         'detail': f'[{mode}] {target_type} 완료 — ' + (result.get('error') or f'{len(self.logs)}줄 로그'),
-                        'finished_at': datetime.now(timezone.utc).isoformat(),
-                        'duration_ms': _elapsed,
+                        'duration_ms': _elapsed,    # finished_at 컬럼 없음 → updated_at 자동
                         'meta': _meta,
                     })
                 except Exception:

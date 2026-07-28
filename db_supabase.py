@@ -2264,6 +2264,7 @@ class SupabaseDB(DBBase):
         from datetime import datetime, timezone
         from config import Config
         now_str = datetime.now(timezone.utc).isoformat()
+        _bid = self._resolve_biz_id(None)
         payload = []
         for page_key, name, icon, url, default_roles, *_ in page_registry:
             for role in Config.ROLES.keys():
@@ -2272,11 +2273,12 @@ class SupabaseDB(DBBase):
                     'page_key': page_key,
                     'is_allowed': role in default_roles,
                     'updated_at': now_str,
+                    'biz_id': _bid,
                 })
         # 500건씩 배치 upsert
         for i in range(0, len(payload), 500):
             self.client.table("role_permissions").upsert(
-                payload[i:i+500], on_conflict="role,page_key"
+                payload[i:i+500], on_conflict="biz_id,role,page_key"
             ).execute()
         self._invalidate_perm_cache()
 
@@ -4754,6 +4756,7 @@ class SupabaseDB(DBBase):
         else:
             data['employee_id'] = int(employee_id)
             data['leave_year'] = int(year)
+            self._inject_biz_id(data, self._resolve_biz_id(None))
             res = self.client.table("annual_leave").insert(data).execute()
             return res.data[0] if res.data else None
 

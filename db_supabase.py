@@ -4888,6 +4888,7 @@ class SupabaseDB(DBBase):
             res = self._with_biz(q, biz_id).execute()
         else:
             # 신규
+            self._inject_biz_id(data, self._resolve_biz_id(biz_id))
             res = self.client.table("salary_components").insert(data).execute()
         return res.data[0] if res.data else None
 

@@ -2242,13 +2242,14 @@ class SupabaseDB(DBBase):
         """한 역할의 권한 일괄 저장. perms_dict = {page_key: bool}."""
         from datetime import datetime, timezone
         now_str = datetime.now(timezone.utc).isoformat()
+        _bid = self._resolve_biz_id(None)
         payload = [
-            {'role': role, 'page_key': pk, 'is_allowed': allowed, 'updated_at': now_str}
+            {'role': role, 'page_key': pk, 'is_allowed': allowed, 'updated_at': now_str, 'biz_id': _bid}
             for pk, allowed in perms_dict.items()
         ]
         if payload:
             self.client.table("role_permissions").upsert(
-                payload, on_conflict="role,page_key"
+                payload, on_conflict="biz_id,role,page_key"
             ).execute()
         self._invalidate_perm_cache()
 
@@ -4756,8 +4757,9 @@ class SupabaseDB(DBBase):
             res = self.client.table("annual_leave").insert(data).execute()
             return res.data[0] if res.data else None
 
-    def insert_leave_record(self, data):
+    def insert_leave_record(self, data, *, biz_id=None):
         """연차 사용 기록 등록 + used_days 자동 업데이트."""
+        self._inject_biz_id(data, self._resolve_biz_id(biz_id))
         res = self.client.table("leave_records").insert(data).execute()
         record = res.data[0] if res.data else None
 
@@ -5002,10 +5004,11 @@ class SupabaseDB(DBBase):
                 'min_base': int(rate.get('min_base', 0)),
                 'max_base': int(rate.get('max_base', 0)),
                 'notes': rate.get('notes', ''),
+                'biz_id': self._resolve_biz_id(None),
             }
             try:
                 res = self.client.table("insurance_rates").upsert(
-                    payload, on_conflict="year,insurance_type"
+                    payload, on_conflict="biz_id,year,insurance_type"
                 ).execute()
                 if res.data:
                     count += 1
@@ -5396,11 +5399,12 @@ class SupabaseDB(DBBase):
 
     # ── codef_connections ──
 
-    def insert_codef_connection(self, payload):
+    def insert_codef_connection(self, payload, *, biz_id=None):
         """CODEF 연결 정보 저장 (upsert — connected_id 기준 중복 방지)."""
         try:
+            self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
             self.client.table("codef_connections").upsert(
-                payload, on_conflict="connected_id"
+                payload, on_conflict="biz_id,connected_id"
             ).execute()
         except Exception as e:
             print(f"[DB] insert_codef_connection error: {e}")
@@ -5499,8 +5503,9 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_bank_transaction_by_id error: {e}")
             return None
 
-    def insert_bank_transaction(self, payload):
+    def insert_bank_transaction(self, payload, *, biz_id=None):
         """은행 거래내역 1건 등록."""
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         self.client.table("bank_transactions").insert(payload).execute()
 
     def update_bank_transaction(self, tx_id, update_data, biz_id=None):
@@ -5561,20 +5566,22 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_tax_invoice_by_id error: {e}")
             return None
 
-    def insert_tax_invoice(self, payload):
+    def insert_tax_invoice(self, payload, *, biz_id=None):
         """세금계산서 등록."""
         try:
+            self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
             res = self.client.table("tax_invoices").insert(payload).execute()
             return res.data[0]['id'] if res.data else None
         except Exception as e:
             print(f"[DB] insert_tax_invoice error: {e}")
             return None
 
-    def batch_insert_tax_invoices(self, payloads):
+    def batch_insert_tax_invoices(self, payloads, *, biz_id=None):
         """세금계산서 일괄 등록 (배치). Returns: 삽입된 건수."""
         if not payloads:
             return 0
         try:
+            self._inject_biz_id(payloads, self._resolve_biz_id(biz_id))
             res = self.client.table("tax_invoices").insert(payloads).execute()
             return len(res.data) if res.data else 0
         except Exception as e:
@@ -5647,9 +5654,10 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_payment_match_by_id error: {e}")
             return None
 
-    def insert_payment_match(self, payload):
+    def insert_payment_match(self, payload, *, biz_id=None):
         """매칭 레코드 등록. Returns: match_id (int) or None."""
         try:
+            self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
             res = self.client.table("payment_matches").insert(payload).execute()
             if res.data:
                 return res.data[0].get('id')
@@ -5705,11 +5713,12 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_platform_settlements error: {e}")
             return []
 
-    def insert_platform_settlement(self, payload):
+    def insert_platform_settlement(self, payload, *, biz_id=None):
         """플랫폼 정산 등록 (upsert)."""
         try:
+            self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
             self.client.table("platform_settlements").upsert(
-                payload, on_conflict="channel,settlement_date,api_reference"
+                payload, on_conflict="biz_id,channel,settlement_date,api_reference"
             ).execute()
         except Exception as e:
             print(f"[DB] insert_platform_settlement error: {e}")
@@ -5878,8 +5887,9 @@ class SupabaseDB(DBBase):
         except Exception:
             return False
 
-    def insert_card_transaction(self, payload):
+    def insert_card_transaction(self, payload, *, biz_id=None):
         """카드 이용내역 1건 등록."""
+        self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         def _do():
             self.client.table("card_transactions").insert(payload).execute()
         self._retry_on_disconnect(_do)

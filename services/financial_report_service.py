@@ -131,11 +131,14 @@ def _query_tax_invoices_by_vendor(db, year_month, direction='purchase'):
     """세금계산서 거래처별 합계 조회."""
     try:
         date_from, date_to = _month_range(year_month)
+        # tax_invoices 실제 컬럼: supplier_corp_name/buyer_corp_name, supply_cost_total, tax_total
+        # 거래처명 = 매입이면 공급자(supplier), 매출이면 매입자(buyer)
+        vendor_col = 'supplier_corp_name' if direction == 'purchase' else 'buyer_corp_name'
         res = db.client.table("tax_invoices") \
-            .select("vendor_name,supply_amount,tax_amount,total_amount,issue_date,matched_amount") \
+            .select(f"{vendor_col},supply_cost_total,tax_total,total_amount,write_date,matched_amount") \
             .eq("direction", direction) \
-            .gte("issue_date", date_from) \
-            .lte("issue_date", date_to) \
+            .gte("write_date", date_from) \
+            .lte("write_date", date_to) \
             .execute()
         rows = res.data or []
 
@@ -144,9 +147,9 @@ def _query_tax_invoices_by_vendor(db, year_month, direction='purchase'):
             'total_amount': 0, 'count': 0, 'matched_amount': 0,
         })
         for r in rows:
-            vendor = r.get('vendor_name', '기타') or '기타'
-            by_vendor[vendor]['supply_amount'] += float(r.get('supply_amount', 0) or 0)
-            by_vendor[vendor]['tax_amount'] += float(r.get('tax_amount', 0) or 0)
+            vendor = r.get(vendor_col, '기타') or '기타'
+            by_vendor[vendor]['supply_amount'] += float(r.get('supply_cost_total', 0) or 0)
+            by_vendor[vendor]['tax_amount'] += float(r.get('tax_total', 0) or 0)
             by_vendor[vendor]['total_amount'] += float(r.get('total_amount', 0) or 0)
             by_vendor[vendor]['matched_amount'] += float(r.get('matched_amount', 0) or 0)
             by_vendor[vendor]['count'] += 1

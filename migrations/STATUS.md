@@ -30,3 +30,4 @@
 - 028_missing_master_tables.sql — development — 2026-07-28 20:00
 - 029_bank_expense_dependents.sql — development — 2026-07-28 20:05
 - 030_pnl_agg_with_tax_expenses.sql — development — 2026-07-28 20:10
+- 031_master_products.sql — development — 2026-07-28 20:30

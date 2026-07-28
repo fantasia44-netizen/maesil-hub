@@ -5910,9 +5910,10 @@ class SupabaseDB(DBBase):
     # journal_entries / journal_lines (전표 시스템)
     # ══════════════════════════════════════════
 
-    def insert_journal_entry(self, payload):
+    def insert_journal_entry(self, payload, *, biz_id=None):
         """전표 헤더 등록. Returns: entry_id (int) or None."""
         try:
+            self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
             res = self.client.table("journal_entries").insert(payload).execute()
             if res.data:
                 return res.data[0]['id']
@@ -5921,9 +5922,10 @@ class SupabaseDB(DBBase):
             print(f"[DB] insert_journal_entry error: {e}")
             return None
 
-    def insert_journal_line(self, payload):
+    def insert_journal_line(self, payload, *, biz_id=None):
         """전표 라인 1건 등록."""
         try:
+            self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
             self.client.table("journal_lines").insert(payload).execute()
         except Exception as e:
             print(f"[DB] insert_journal_line error: {e}")

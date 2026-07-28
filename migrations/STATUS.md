@@ -32,3 +32,4 @@
 - 030_pnl_agg_with_tax_expenses.sql — development — 2026-07-28 20:10
 - 031_master_products.sql — development — 2026-07-28 20:30
 - 032_order_shipping_packing_cols.sql — development — 2026-07-28 21:40
+- 033_cost_unique_constraints.sql — development — 2026-07-28 22:00

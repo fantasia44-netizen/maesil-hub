@@ -1221,7 +1221,7 @@ class SupabaseDB(DBBase):
         biz_id = self._resolve_biz_id(biz_id)
         self._inject_biz_id(payload, biz_id)
         self.client.table("product_costs").upsert(
-            payload, on_conflict="product_name"
+            payload, on_conflict="biz_id,product_name"
         ).execute()
 
     def rename_product(self, old_name, new_name, *, biz_id=None):
@@ -1385,7 +1385,7 @@ class SupabaseDB(DBBase):
         self._inject_biz_id(payload, biz_id)
         for i in range(0, len(payload), 500):
             self.client.table("product_costs").upsert(
-                payload[i:i + 500], on_conflict="product_name"
+                payload[i:i + 500], on_conflict="biz_id,product_name"
             ).execute()
 
     def delete_product_cost(self, product_name, biz_id=None):
@@ -1467,7 +1467,7 @@ class SupabaseDB(DBBase):
         }
         self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
         self.client.table("channel_costs").upsert(
-            payload, on_conflict="channel"
+            payload, on_conflict="biz_id,channel"
         ).execute()
 
     def delete_channel_cost(self, channel, biz_id=None):
@@ -5439,9 +5439,10 @@ class SupabaseDB(DBBase):
             print(f"[DB] query_bank_account_by_id error: {e}")
             return None
 
-    def insert_bank_account(self, payload):
+    def insert_bank_account(self, payload, *, biz_id=None):
         """은행 계좌 등록."""
         try:
+            self._inject_biz_id(payload, self._resolve_biz_id(biz_id))
             self.client.table("bank_accounts").insert(payload).execute()
         except Exception as e:
             print(f"[DB] insert_bank_account error: {e}")

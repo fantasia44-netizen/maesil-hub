@@ -174,10 +174,8 @@
 
     <!-- 설정 -->
     <div class="menu-label">설정</div>
-    {# BLIND(master_products 미존재 — total에도 없음) — 재노출 시 주석 제거
     <a class="nav-link {% if request.path.startswith('/master') %}active{% endif %}"
        href="/master/"><i class="bi bi-tags"></i> 상품마스터</a>
-    #}
     <a class="nav-link {% if request.path.startswith('/bom-cost') %}active{% endif %}"
        href="/bom-cost/"><i class="bi bi-diagram-3"></i> BOM/원가</a>
     <a class="nav-link {% if request.path.startswith('/price') %}active{% endif %}"

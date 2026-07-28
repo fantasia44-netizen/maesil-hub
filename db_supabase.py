@@ -308,13 +308,25 @@ class SupabaseDB(DBBase):
             row['product_name'] = norm_map.get(pn_clean) or pn_clean or str(pn).strip()
         return payload_list
 
+    @staticmethod
+    def _normalize_ledger_dates(rows):
+        """DATE 컬럼에 빈 문자열('') 대신 None 주입.
+        hub stock_ledger의 manufacture_date/expiry_date는 DATE 타입 →
+        ''는 'invalid input syntax for type date' 유발. total(TEXT) 코드 이식 호환."""
+        _DATE_COLS = ('transaction_date', 'manufacture_date', 'expiry_date')
+        for r in rows:
+            for k in _DATE_COLS:
+                if k in r and isinstance(r[k], str) and not r[k].strip():
+                    r[k] = None
+        return rows
+
     def insert_stock_ledger(self, payload_list, *, biz_id=None):
         if not payload_list:
             return {'inserted': 0, 'failed': 0, 'errors': []}
         biz_id = self._resolve_biz_id(biz_id)
         payload_list = self._normalize_product_names(payload_list)
         payload_list = self._inject_biz_id(payload_list, biz_id)
-        filtered = self._filter_payload(payload_list)
+        filtered = self._normalize_ledger_dates(self._filter_payload(payload_list))
 
         def _batch_insert():
             self.client.table("stock_ledger").insert(filtered).execute()
@@ -353,7 +365,7 @@ class SupabaseDB(DBBase):
         biz_id = self._resolve_biz_id(biz_id)
         payload_list = self._normalize_product_names(payload_list)
         payload_list = self._inject_biz_id(payload_list, biz_id)
-        filtered = self._filter_payload(payload_list)
+        filtered = self._normalize_ledger_dates(self._filter_payload(payload_list))
 
         # event_uid가 있는 것과 없는 것 분리
         with_uid = [p for p in filtered if p.get('event_uid')]

@@ -34,3 +34,4 @@
 - 032_order_shipping_packing_cols.sql — development — 2026-07-28 21:40
 - 033_cost_unique_constraints.sql — development — 2026-07-28 22:00
 - 034_missing_subsystem_tables.sql — development — 2026-07-29 01:50
+- 035_biz_id_upsert_constraints.sql — development — 2026-07-29 02:10

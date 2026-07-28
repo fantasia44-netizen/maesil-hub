@@ -312,6 +312,7 @@ def create_app():
     def set_tenant_context():
         g.biz_id = None
         g.biz_name = None
+        g.user_role = None
         g.is_impersonating = False
         g.marketplace = _NullMarketplace()  # 기본값; biz_id 확정 후 교체
         if not current_user.is_authenticated:
@@ -322,6 +323,18 @@ def create_app():
             g.is_impersonating = True
         else:
             g.biz_id = session.get('current_biz_id')
+
+        # 현재 biz에서의 역할 해석 — current_user.role 프로퍼티가 g.user_role 참조.
+        # 미설정 시 항상 'viewer'로 떨어져 packing_required 등 role 기반 접근이 깨짐.
+        if g.biz_id:
+            if current_user.is_super_admin:
+                g.user_role = 'admin'
+            else:
+                try:
+                    from auth.helpers import get_user_role
+                    g.user_role = get_user_role(current_user.id, g.biz_id)
+                except Exception:
+                    g.user_role = None
 
         # 회사명 캐시 (session 활용)
         if g.biz_id:
